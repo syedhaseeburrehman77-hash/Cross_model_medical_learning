@@ -399,23 +399,28 @@ def evaluate(msg: Message, context: Context):
             radius_val = float(cfg["radius"])
             subregion_params = (center_val, radius_val)
         trainer = get_trainer("floco")
-        eval_loss, eval_acc = trainer.evaluate(model, valloader, device, subregion_parameters=subregion_params)
+        eval_loss, eval_acc, eval_precision, eval_recall, eval_f1, eval_sensitivity, eval_specificity = trainer.evaluate(model, valloader, device, subregion_parameters=subregion_params)
 
     else:
         # Call the evaluation function
-        eval_loss, eval_acc = evaluate_model(
+        eval_loss, eval_acc, eval_precision, eval_recall, eval_f1, eval_sensitivity, eval_specificity = evaluate_model(
             model,
             valloader,
             device,
         )
-
+        
     # Construct and return reply Message
     metrics = {
         "eval_loss": eval_loss,
         "eval_acc": eval_acc,
+        "eval_pre": eval_precision,
+        "eval_rec": eval_recall,
+        "eval_f1": eval_f1,
+        "eval_sen": eval_sensitivity,
+        "eval_spec": eval_specificity,
         "num-examples": len(valloader.dataset),
-        "partition-id": partition_id,
     }
+
     metric_record = MetricRecord(metrics)
     content = RecordDict({"metrics": metric_record})
     return Message(content=content, reply_to=msg)
