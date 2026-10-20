@@ -4,7 +4,6 @@ from sklearn.metrics import precision_score, recall_score, f1_score, confusion_m
 import csv
 import os
 from datetime import datetime
-from pathlib import Path
 
 def evaluate_model(net, testloader, device):
     """Validate the model on the test set."""
@@ -48,25 +47,41 @@ def evaluate_model(net, testloader, device):
 
     return loss, accuracy, precision, recall, f1, sensitivity, specificity
 
-def save_results(metrics, dataset, filename=None):
-    import csv
-    from pathlib import Path
 
-    if filename is None:
-        filename = RESULTS_FILE
+results_file = (f"evaluation_metrics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
 
-    row = {
-        "Dataset": dataset,
-        "Algorithm": metrics.get("algorithm", ""),
-        "Loss": metrics.get("eval_loss", metrics.get("loss", "")),
-        "Accuracy": metrics.get("eval_acc", metrics.get("accuracy", "")),
-        "Precision": metrics.get("eval_pre", metrics.get("precision", "")),
-        "Recall": metrics.get("eval_rec", metrics.get("recall", "")),
-        "F1-score": metrics.get("eval_f1", metrics.get("f1", "")),
-        "Sensitivity": metrics.get("eval_sen", metrics.get("sensitivity", "")),
-        "Specificity": metrics.get("eval_spec", metrics.get("specificity", "")),
+def save_metrics(
+    loss,
+    accuracy,
+    precision,
+    recall,
+    f1,
+    sensitivity,
+    specificity,
+    filename=results_file
+):
+    """Save evaluation metrics to a CSV file."""
+
+    file_exists = os.path.isfile(filename)
+
+    metrics = {
+        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Loss": loss,
+        "Accuracy": accuracy,
+        "Precision": precision,
+        "Recall": recall,
+        "F1_Score": f1,
+        "Sensitivity": sensitivity,
+        "Specificity": specificity
     }
 
-    with open(filename, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-        writer.writerow(row)
+    with open(filename, mode="a", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=metrics.keys())
+
+        # Write column names only when creating a new file
+        if not file_exists:
+            writer.writeheader()
+
+        writer.writerow(metrics)
+
+    print(f"Metrics saved to {filename}")

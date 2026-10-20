@@ -3,7 +3,7 @@ from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
 
 from task import load_centralized_dataset
-from utils.metrics import evaluate_model
+from utils.metrics import evaluate_model, save_metrics
 
 from algorithms.server_strategies import get_strategy
 
@@ -175,7 +175,12 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
                         "test_f1": test_f1,
                         "test_sen": test_sensitivity,
                         "test_spec": test_specificity,}
-    
+
+    # Save the metrics
+    save_metrics(
+       test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity,
+    )
+
     return MetricRecord(metrics)
 
 

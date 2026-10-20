@@ -2,18 +2,16 @@ import torch.nn as nn
 from torchvision import models
 
 from .base import BaseModel
-
-
 class MobileNetModel(BaseModel):
 
     def build(self) -> nn.Module:
         model = models.mobilenet_v2(
-            weights=models.MobileNet_V2_Weights.DEFAULT
+            weights=models.MobileNet_V2_Weights.IMAGENET1K_V1
         )
 
         # Freeze backbone
         for param in model.features.parameters():
-            param.requires_grad = False
+            param.requires_grad = True
 
         # Classification head
         model.classifier = nn.Sequential(
@@ -21,7 +19,7 @@ class MobileNetModel(BaseModel):
             nn.Linear(1280, 256),
             nn.ReLU(inplace=True),
             nn.Dropout(p=0.3),
-            nn.Linear(256, 10),
+            nn.Linear(256, 2),
         )
 
         return model

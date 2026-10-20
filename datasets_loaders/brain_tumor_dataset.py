@@ -37,7 +37,7 @@ class BrainTumorLoader(BaseDatasetLoader):
         dataset = dataset.cast_column("img", Image())
 
         brain_dataset = dataset.train_test_split(
-            test_size=0.2,
+            test_size=0.15,
             seed=42,
         )
         
