@@ -4,6 +4,7 @@ from sklearn.metrics import precision_score, recall_score, f1_score, confusion_m
 import csv
 import os
 from datetime import datetime
+from pathlib import Path
 
 def evaluate_model(net, testloader, device):
     """Validate the model on the test set."""
@@ -47,9 +48,6 @@ def evaluate_model(net, testloader, device):
 
     return loss, accuracy, precision, recall, f1, sensitivity, specificity
 
-
-results_file = (f"evaluation_metrics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
-
 def save_metrics(
     loss,
     accuracy,
@@ -58,13 +56,19 @@ def save_metrics(
     f1,
     sensitivity,
     specificity,
-    filename=results_file
+    algorithm,
+    filename=None,
 ):
     """Save evaluation metrics to a CSV file."""
 
+    if filename is None:
+        filename = f"results/evaluation_metrics_{algorithm}.csv"
+
+    Path(filename).parent.mkdir(parents=True, exist_ok=True)
     file_exists = os.path.isfile(filename)
 
     metrics = {
+        "Algorithm": algorithm,
         "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Loss": loss,
         "Accuracy": accuracy,
@@ -72,13 +76,12 @@ def save_metrics(
         "Recall": recall,
         "F1_Score": f1,
         "Sensitivity": sensitivity,
-        "Specificity": specificity
+        "Specificity": specificity,
     }
 
     with open(filename, mode="a", newline="") as file:
         writer = csv.DictWriter(file, fieldnames=metrics.keys())
 
-        # Write column names only when creating a new file
         if not file_exists:
             writer.writeheader()
 

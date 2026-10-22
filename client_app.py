@@ -1,5 +1,4 @@
 """pytorchexample: A Flower / PyTorch app."""
-
 import torch
 import json
 import numpy as np
@@ -20,10 +19,23 @@ from utils.moon_helper import prepare_moon_model
 from utils.fedper_helper import get_fedper_head_state_dict, get_fedper_shared_state_dict, load_fedper_head_state_dict
 from utils.floco_helper import convert_to_floco
 
+def check_finite_state(state, stage):
+    for name, tensor in state.items():
+        if torch.is_tensor(tensor) and (
+            torch.is_floating_point(tensor)
+            or torch.is_complex(tensor)
+        ):
+            if not torch.isfinite(tensor).all():
+                raise RuntimeError(
+                    f"[{stage}] NaN/Inf detected in: {name}"
+                )
+
 # Flower ClientApp
 app = ClientApp()
 
 @app.train()
+
+
 def train(msg: Message, context: Context):
     """Train the model on local data."""
 
@@ -51,6 +63,7 @@ def train(msg: Message, context: Context):
 
     # Load received parameters
     received_state= msg.content["arrays"].to_torch_state_dict()
+    check_finite_state(received_state, "received global model")
 
     scaffold_parameter_names = []
     scaffold_server_cv = None
@@ -152,6 +165,7 @@ def train(msg: Message, context: Context):
 
     else:
         model.load_state_dict(received_state)
+        
 
     model.to(device)
 
@@ -159,7 +173,7 @@ def train(msg: Message, context: Context):
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
     batch_size = context.run_config["batch-size"]
-    trainloader, _ = load_data(partition_id, num_partitions, batch_size)
+    trainloader, testloader = load_data(partition_id, num_partitions, batch_size)
 
     # Pull algorithm-specific kwargs (e.g. proximal_mu) straight from config —
     # trainers that don't need them just ignore extras via **kwargs
@@ -259,8 +273,15 @@ def train(msg: Message, context: Context):
             context.run_config["local-epochs"],
             msg.content["config"]["lr"],
             device,
+            valloader=testloader,
+            patience=5,
         )
-        
+
+        check_finite_state(
+            model.state_dict(),
+            f"client {partition_id} after local training"
+        )
+
     # Clean up teacher model to conserve VRAM on laptop GPUs
     if algorithm == "fedmlb":
         del global_model
@@ -346,6 +367,10 @@ def evaluate(msg: Message, context: Context):
         model = convert_to_floco(model, endpoints=endpoints, seed=seed)
    
     received_state = msg.content["arrays"].to_torch_state_dict()
+    check_finite_state(
+    received_state,
+    f"client {context.node_config['partition-id']} received model for evaluation"
+    )
 
     if algorithm == "fedmeta_meta_sgd":
         model_state = {k: v for k, v in received_state.items() if not k.startswith("alpha.")}
@@ -408,6 +433,41 @@ def evaluate(msg: Message, context: Context):
             valloader,
             device,
         )
+
+                # Check global model parameters and buffers
+        for name, tensor in model.state_dict().items():
+            if torch.is_floating_point(tensor) or torch.is_complex(tensor):
+                if not torch.isfinite(tensor).all():
+                    raise RuntimeError(
+                        f"Global model contains NaN/Inf before evaluation: {name}"
+                    )
+
+        # Inspect the first evaluation batch
+        batch = next(iter(valloader))
+        images = batch["img"].to(device)
+
+        if not torch.isfinite(images).all():
+            raise RuntimeError("Global evaluation images contain NaN/Inf")
+
+        print("Global model state is finite")
+        print("Input images are finite")
+        print("Input shape:", tuple(images.shape))
+        print("Input range:", images.min().item(), images.max().item())
+
+        model.eval()
+        with torch.no_grad():
+            outputs = model(images)
+
+        print("Output shape:", tuple(outputs.shape))
+        print("Output finite:", torch.isfinite(outputs).all().item())
+
+        if torch.isfinite(outputs).any():
+            finite_outputs = outputs[torch.isfinite(outputs)]
+            print(
+                "Finite output range:",
+                finite_outputs.min().item(),
+                finite_outputs.max().item()
+            )
         
     # Construct and return reply Message
     metrics = {

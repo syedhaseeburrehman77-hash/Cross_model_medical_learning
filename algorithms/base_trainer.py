@@ -17,7 +17,7 @@ class BaseTrainer(ABC):
         Override if the algorithm needs to snapshot state (e.g. global params)."""
         pass
 
-    def train(self, model, trainloader, epochs, lr, device, valloader=None, patience=3):
+    def train(self, model, trainloader, epochs, lr, device, valloader=None, patience=5):
         """Shared training loop — same for every algorithm.
         Only compute_loss / on_train_start differ per strategy."""
         self.on_train_start(model)
@@ -46,6 +46,9 @@ class BaseTrainer(ABC):
                 outputs = model(images)
                 loss = self.compute_loss(model, outputs, labels, criterion)
                 loss.backward()
+                for p in model.parameters():
+                    if p.grad is not None and not torch.isfinite(p.grad).all():
+                        raise RuntimeError("NaN/Inf gradients detected")
                 optimizer.step()
 
                 total_loss += loss.item()

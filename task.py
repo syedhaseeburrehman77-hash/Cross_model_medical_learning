@@ -89,4 +89,4 @@ def load_centralized_dataset():
     dataset = test_dataset.with_transform(
     lambda batch: apply_transforms(batch, train=False)
     )
-    return DataLoader(dataset, batch_size=128)
+    return DataLoader(dataset, batch_size=16)

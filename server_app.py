@@ -2,8 +2,9 @@ import torch
 from flwr.app import ArrayRecord, ConfigRecord, Context, MetricRecord
 from flwr.serverapp import Grid, ServerApp
 
-from task import load_centralized_dataset
+from task import load_centralized_dataset, get_dataset
 from utils.metrics import evaluate_model, save_metrics
+from utils.data_distribution import export_data_distribution
 
 from algorithms.server_strategies import get_strategy
 
@@ -118,6 +119,15 @@ def main(grid: Grid, context: Context) -> None:
     else:
         evaluate_fn = global_evaluate
 
+    # Export distribution before training
+    num_partitions = get_num_supernodes()
+    dataset = get_dataset()
+
+    export_data_distribution(
+        dataset=dataset,
+        num_partitions=num_partitions,
+    )
+
     # Start strategy, run for `num_rounds`
     result = strategy.start(
         grid=grid,
@@ -178,7 +188,7 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
 
     # Save the metrics
     save_metrics(
-       test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity,
+       test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity, algorithm=algorithm,
     )
 
     return MetricRecord(metrics)

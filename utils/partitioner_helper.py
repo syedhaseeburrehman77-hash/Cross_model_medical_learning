@@ -13,11 +13,13 @@ PARTITIONERS = {
         num_partitions=num_partitions,
         partition_by="label",
         alpha=cfg["alpha"],
+         seed=cfg.get("seed", 42),
     ),
     "shard": lambda cfg, num_partitions: ShardPartitioner(
         num_partitions=num_partitions,
         partition_by="label",
         num_shards_per_partition=cfg["num_shards"],
+         seed=cfg.get("seed", 42),
     ),
 }
 
