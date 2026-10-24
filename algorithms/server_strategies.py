@@ -1,3 +1,4 @@
+import wandb
 from flwr.serverapp.strategy import FedAvg, FedProx, FedAvgM, FedAdam, FedAdagrad, FedYogi, FedMedian
 from .fednova import FedNova
 from .fedmeta import FedMeta
@@ -34,4 +35,5 @@ def get_strategy(algorithm: str, **kwargs):
         raise ValueError(
             f"Unknown algorithm '{algorithm}'. Available: {list(STRATEGY_REGISTRY)}"
         )
-    return strategy_cls(**kwargs)
+    strategy = strategy_cls(**kwargs)
+    return strategy

@@ -1,5 +1,5 @@
 import numpy as np
-
+import wandb
 from flwr.app import Array, ArrayRecord
 from flwr.serverapp.strategy import FedAvg
 
@@ -131,5 +131,8 @@ class Scaffold(FedAvg):
             [msg.content for msg in valid_replies],
             self.weighted_by_key,
         )
+
+        server_cv_norm = float(np.sqrt(sum(np.sum(np.square(v)) for v in self.server_cv.values())))
+        wandb.log({"round": server_round, "scaffold/server_cv_norm": server_cv_norm})
 
         return self.current_arrays, metrics

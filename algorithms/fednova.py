@@ -1,4 +1,5 @@
 import numpy as np
+import wandb
 from flwr.app import Array, ArrayRecord
 from flwr.serverapp.strategy import FedAvg
 
@@ -67,4 +68,5 @@ class FedNova(FedAvg):
 
         self.current_arrays = ArrayRecord({k: Array(np.asarray(v)) for k, v in zip(array_keys, new_ndarrays)})
         metrics = self.train_metrics_aggr_fn([msg.content for msg in valid_replies], self.weighted_by_key)
+        wandb.log({"round": server_round, "fednova/tau_eff": float(tau_eff)})
         return self.current_arrays, metrics

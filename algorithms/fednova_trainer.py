@@ -11,9 +11,9 @@ class FedNovaTrainer(BaseTrainer):
     def compute_loss(self, model, outputs, labels, criterion):
         return criterion(outputs, labels)
 
-    def train(self, model, trainloader, epochs, lr, device):
+    def train(self, model, trainloader, epochs, lr, device,valloader=None, patience=5):
         # Reuses shared BaseTrainer.train()
-        loss = super().train(model, trainloader, epochs, lr, device)
+        loss = super().train(model, trainloader, epochs, lr, device, valloader=valloader, patience=patience)
         # Total local steps a_i = epochs * batches
         self.local_norm = float(epochs * len(trainloader))
         return loss

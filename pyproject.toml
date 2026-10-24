@@ -16,18 +16,18 @@ dependencies = [
     "pytest"
 ]
 
-#[tool.uv.sources]
-#torch = [
-#    { index = "pytorch-cu128" },
-#]
-#torchvision = [
-#    { index = "pytorch-cu128" },
-#]
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu128" },
+]
+torchvision = [
+    { index = "pytorch-cu128" },
+]
 
-#[[tool.uv.index]]
-#name = "pytorch-cu128"
-#url = "https://download.pytorch.org/whl/cu128"
-#explicit = true
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
@@ -42,18 +42,18 @@ serverapp = "server_app:app"
 clientapp = "client_app:app"
 
 [tool.flwr.app.config]
-num-server-rounds = 10
+num-server-rounds = 3
 fraction-evaluate = 1.0
 local-epochs = 1
-learning-rate = 0.02
-batch-size = 32
+learning-rate = 0.001
+batch-size = 16
 save-model = false
 fraction-fit = 1.0
-min-available-clients = 5  
-algorithm = "floco"
+min-available-clients = 2
+algorithm = "moon"
 proximal-mu = 0.01
-server-learning-rate = 1.0
-server-momentum = 0.9
+server-learning-rate = 0.1
+server-momentum = 0.5
 beta-1 = 0.9
 beta-2 = 0.99
 tau = 2                  # 0.001
@@ -70,10 +70,10 @@ fedmeta-support-ratio = 0.2
 endpoints = 10
 rho = 0.3
 pers_lamda = 0
-seed = 0     
-model_name = "cnn"
+model_name = "mobilenet"
 
 [partition]
 type = "dirichlet"   # options: iid, dirichlet, shard
-alpha = 0.3          # used only for dirichlet
+alpha = 0.5          # used only for dirichlet
+seed = 42
 num_shards = 2       # used only for shard

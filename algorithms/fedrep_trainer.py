@@ -15,7 +15,7 @@ class FedRepTrainer(BaseTrainer):
     def compute_loss(self, model, outputs, labels, criterion):
         return criterion(outputs, labels)
 
-    def train(self, model, trainloader, local_epochs, lr, device):
+    def train(self, model, trainloader, local_epochs, lr, device, valloader=None, patience=5):
         model.to(device)
 
         modules = dict(model.named_modules())
@@ -78,10 +78,16 @@ class FedRepTrainer(BaseTrainer):
                     total_batches += 1
 
         # Phase 1: train the local head, freeze the representation.
+        total_loss = 0.0
+        total_batches = 0
         run_phase(head_params, self.head_epochs, train_head=True)
+        head_loss = total_loss / max(total_batches, 1)
 
         # Phase 2: train the shared representation, freeze the local head.
+        total_loss = 0.0
+        total_batches = 0
         run_phase(rep_params, local_epochs, train_head=False)
+        rep_loss = total_loss / max(total_batches, 1)
 
         # Restore normal parameter behavior for subsequent operations.
         for param in model.parameters():
@@ -89,6 +95,10 @@ class FedRepTrainer(BaseTrainer):
 
         model.train()
 
-        average_loss = total_loss / max(total_batches, 1)
-        self.last_metrics = {"train_loss": average_loss}
+        average_loss = (head_loss + rep_loss) / 2.0
+        self.last_metrics = {
+            "train_loss": average_loss,
+            "fedrep_head_loss": head_loss,
+            "fedrep_rep_loss": rep_loss,
+        }
         return average_loss

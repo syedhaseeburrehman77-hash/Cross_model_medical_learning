@@ -121,3 +121,9 @@ class ScaffoldTrainer(BaseTrainer):
             )
 
         return self.client_cv_new
+
+    def get_metrics(self) -> dict:
+        drift_norm = 0.0
+        if self.model_delta:
+            drift_norm = float(torch.norm(torch.stack([d.norm() for d in self.model_delta])))
+        return {"scaffold_client_drift": drift_norm}

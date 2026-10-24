@@ -8,6 +8,7 @@ class FedProxTrainer(BaseTrainer):
         super().__init__(**kwargs)
         self.proximal_mu = proximal_mu
         self.global_params = None
+        self.last_proximal_term = 0.0
 
     def on_train_start(self, model):
         # Snapshot global params BEFORE local training mutates them
@@ -20,5 +21,9 @@ class FedProxTrainer(BaseTrainer):
             (local_p - global_p).pow(2).sum()
             for local_p, global_p in zip(model.parameters(), self.global_params)
         )
+        self.last_proximal_term = float(proximal_term.item())
         loss += (self.proximal_mu / 2) * proximal_term
         return loss
+
+    def get_metrics(self) -> dict:
+        return {"proximal_penalty": self.last_proximal_term}

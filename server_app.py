@@ -17,6 +17,8 @@ from utils.moon_helper import prepare_moon_model
 from utils.fedper_helper import get_fedper_shared_state_dict
 from utils.floco_helper import convert_to_floco
 from utils.scaffold_helper import get_num_supernodes, get_trainable_parameter_names
+from flwr.serverapp.strategy.strategy_utils import aggregate_metricrecords
+import wandb
 
 # Create ServerApp
 app = ServerApp()
@@ -40,6 +42,24 @@ def main(grid: Grid, context: Context) -> None:
 
     # Model selected from config
     model_name = context.run_config["model_name"]
+
+    run = wandb.init(
+        project="federated-learning",
+        name=f"{algorithm}-{model_name}",
+        config={
+            "algorithm": algorithm,
+            "model_name": model_name,
+            "num_rounds": num_rounds,
+            "learning_rate": lr,
+            "fraction_evaluate": fraction_evaluate,
+            "num_clients": get_num_supernodes(),
+            "batch_size": context.run_config["batch-size"],
+            "local_epochs": context.run_config["local-epochs"],
+        },
+    )
+
+    wandb.define_metric("round")
+    wandb.define_metric("*", step_metric="round")
 
     # Load global model
     global_model = create_model(model_name)
@@ -66,11 +86,48 @@ def main(grid: Grid, context: Context) -> None:
     else:
         arrays = ArrayRecord(global_model.state_dict())
 
+    # Track rounds for client-side training and evaluation
+    train_round = 0
+    def wandb_train_metrics_aggr(records, weighting_key):
+        nonlocal train_round
+        train_round += 1
+        # Flower weighted aggregation of client training metrics
+        metrics = aggregate_metricrecords(records, weighting_key)
+
+        log_data = {"round": train_round}
+        for k, v in metrics.items():
+            # Exclude raw partition-id from graphs
+            if k != "partition-id" and isinstance(v, (int, float)):
+                log_data[f"train/{k}"] = float(v)
+        wandb.log(log_data)
+        return metrics
+
+    eval_round = 0
+    def wandb_eval_metrics_aggr(records, weighting_key):
+        nonlocal eval_round
+        eval_round += 1
+        # Flower weighted aggregation of client validation metrics
+        metrics = aggregate_metricrecords(records, weighting_key)
+
+        wandb.log({
+            "round": eval_round,
+            "fed_eval/accuracy": float(metrics.get("eval_acc", 0.0)),
+            "fed_eval/loss": float(metrics.get("eval_loss", 0.0)),
+            "fed_eval/precision": float(metrics.get("eval_pre", 0.0)),
+            "fed_eval/recall": float(metrics.get("eval_rec", 0.0)),
+            "fed_eval/f1": float(metrics.get("eval_f1", 0.0)),
+            "fed_eval/sensitivity": float(metrics.get("eval_sen", 0.0)),
+            "fed_eval/specificity": float(metrics.get("eval_spec", 0.0)),
+        })
+        return metrics
+
     # Build kwargs relevant to whichever strategy is picked;
     # extras are ignored by strategies that don't use them
     strategy_kwargs = {
         "fraction_evaluate": context.run_config["fraction-evaluate"],
         "min_available_nodes": context.run_config["min-available-clients"],
+        "train_metrics_aggr_fn": wandb_train_metrics_aggr,
+        "evaluate_metrics_aggr_fn": wandb_eval_metrics_aggr,
     }
 
     if algorithm == "fedprox":
@@ -128,15 +185,34 @@ def main(grid: Grid, context: Context) -> None:
         num_partitions=num_partitions,
     )
 
-    # Start strategy, run for `num_rounds`
-    result = strategy.start(
-        grid=grid,
-        initial_arrays=arrays,
-        train_config=ConfigRecord({"lr": lr}),
-        num_rounds=num_rounds,
-        evaluate_fn=evaluate_fn,
-    )
+    try:
 
+        # Start strategy, run for `num_rounds`
+        result = strategy.start(
+            grid=grid,
+            initial_arrays=arrays,
+            train_config=ConfigRecord({"lr": lr}),
+            num_rounds=num_rounds,
+            evaluate_fn=evaluate_fn,
+        )
+
+        if context.run_config["save-model"]:
+            print("\nSaving final model to disk...")
+            state_dict = result.arrays.to_torch_state_dict()
+
+            if algorithm in ("fedper", "fedrep"):
+                torch.save(state_dict, f"{algorithm}_shared_state.pt")
+                print(
+                    f"Saved {algorithm} shared parameters only. "
+                    "Client-specific heads are not included."
+                )
+            else:
+                torch.save(state_dict, "final_model.pt")
+    
+    finally:
+        wandb.finish()
+        
+    ##############################################
     if context.run_config["save-model"]:
         # Save final model to disk
         print("\nSaving final model to disk...")
@@ -185,6 +261,18 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
                         "test_f1": test_f1,
                         "test_sen": test_sensitivity,
                         "test_spec": test_specificity,}
+
+     # Log global evaluation metrics to W&B
+    wandb.log({
+        "round": server_round,
+        "global/accuracy": float(test_acc),
+        "global/loss": float(test_loss),
+        "global/precision": float(test_precision),
+        "global/recall": float(test_recall),
+        "global/f1": float(test_f1),
+        "global/sensitivity": float(test_sensitivity),
+        "global/specificity": float(test_specificity),
+    })
 
     # Save the metrics
     save_metrics(

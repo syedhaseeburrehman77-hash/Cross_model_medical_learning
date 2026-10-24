@@ -25,6 +25,9 @@ class MoonTrainer(BaseTrainer):
             raise ValueError("MOON temperature must be greater than zero.")
         self.mu = mu
         self.temperature = temperature
+        self.last_ce_loss = 0.0
+        self.last_con_loss = 0.0
+
 
     def compute_loss(self, model, outputs, labels, criterion):
         return criterion(outputs, labels)
@@ -72,6 +75,8 @@ class MoonTrainer(BaseTrainer):
         previous_forward = MoonFeatureForward(previous_model)
 
         total_loss = 0.0
+        total_ce_loss = 0.0     
+        total_con_loss = 0.0
         num_batches = 0
 
         try:
@@ -102,10 +107,23 @@ class MoonTrainer(BaseTrainer):
                     optimizer.step()
 
                     total_loss += loss.item()
+                    total_ce_loss += loss_ce.item()
+                    total_con_loss += loss_con.item()
                     num_batches += 1
+
+            # Store the averages at the end of training
+            if num_batches > 0:
+                self.last_ce_loss = total_ce_loss / num_batches
+                self.last_con_loss = total_con_loss / num_batches
         finally:
             local_forward.close()
             global_forward.close()
             previous_forward.close()
 
         return total_loss / max(num_batches, 1)
+
+    def get_metrics(self) -> dict:
+        return {
+            "moon_ce_loss": self.last_ce_loss,
+            "moon_contrastive_loss": self.last_con_loss,
+        }

@@ -11,6 +11,7 @@ import json
 from typing import Dict, Iterable, List, Optional
 import numpy as np
 import torch
+import wandb
 
 from flwr.app import ArrayRecord, ConfigRecord, Message, MessageType, RecordDict
 from flwr.serverapp.strategy import FedAvg
@@ -142,6 +143,11 @@ class Floco(FedAvg):
                 ]
 
         # Standard weighted FedAvg parameter aggregation
+        wandb.log({
+            "round": server_round,
+            "floco/projected_clients": len(self.client_subregion_parameters),
+            "floco/active_subregion_radius": float(self.rho) if server_round >= self.tau else 0.0,
+        })
         return super().aggregate_train(server_round, valid_replies)
 
     def configure_evaluate(
