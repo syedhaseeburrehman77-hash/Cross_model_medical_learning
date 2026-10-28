@@ -186,9 +186,11 @@ def train(msg: Message, context: Context):
             server_cv=scaffold_server_cv,
             client_cv=scaffold_client_cv,
         )
-    else:    
+    else:
+        head_name = "classifier" if hasattr(model, "classifier") else "fc3"
         trainer = get_trainer(
         algorithm,
+        head_module_name=head_name,
         proximal_mu=msg.content["config"].get("proximal_mu", 0.0),
         head_epochs=msg.content["config"].get("fedrep-head-epochs", 1),
         mu=context.run_config.get("moon-mu", 1.0),

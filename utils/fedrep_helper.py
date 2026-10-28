@@ -2,8 +2,20 @@
 
 from collections import OrderedDict
 
-def get_fedrep_head_state_dict(model, head_name="fc3"):
+def get_head_name(model):
+    """Automatically detect whether the head is 'classifier' (MobileNet/ResNet/VGG) or 'fc3' (CNN)."""
+    if hasattr(model, "classifier"):
+        return "classifier"
+    elif hasattr(model, "fc3"):
+        return "fc3"
+    elif hasattr(model, "fc"):
+        return "fc"
+    return "classifier"
+
+def get_fedrep_head_state_dict(model, head_name=None):
     """Return the client-specific classification head state."""
+    if head_name is None:
+        head_name = get_head_name(model)
     prefix = f"{head_name}."
 
     return OrderedDict(
@@ -13,10 +25,11 @@ def get_fedrep_head_state_dict(model, head_name="fc3"):
     )
 
 
-def get_fedrep_shared_state_dict(model, head_name="fc3"):
+def get_fedrep_shared_state_dict(model, head_name=None):
     """Return model state excluding the classification head."""
+    if head_name is None:
+        head_name = get_head_name(model)
     prefix = f"{head_name}."
-
     return OrderedDict(
         (key, value)
         for key, value in model.state_dict().items()

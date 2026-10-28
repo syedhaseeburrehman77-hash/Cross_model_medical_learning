@@ -19,13 +19,24 @@ class FedRepTrainer(BaseTrainer):
         model.to(device)
 
         modules = dict(model.named_modules())
-        if self.head_module_name not in modules:
+
+        # Automatically select 'classifier' for MobileNet or 'fc3' for CNN
+        head_name = self.head_module_name
+        if head_name is None or head_name not in modules:
+            if "classifier" in modules:
+                head_name = "classifier"
+            elif "fc3" in modules:
+                head_name = "fc3"
+            elif "fc" in modules:
+                head_name = "fc"
+
+        if head_name not in modules:
             raise ValueError(
-                f"Head module '{self.head_module_name}' "
+                f"Head module '{head_name}' "
                 "was not found in the model."
             )
 
-        head = modules[self.head_module_name]
+        head = modules[head_name]
 
         head_params = list(head.parameters())
         head_param_ids = {id(param) for param in head_params}
