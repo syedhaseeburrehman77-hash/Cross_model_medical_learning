@@ -66,7 +66,7 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int):
  
     partition = partition.train_test_split(test_size=0.15, seed=42,)
 
-    print(f"Client {partition_id}: train={len(partition["train"])}, test={len(partition["test"])}")
+    print(f"Client {partition_id}: train={len(partition['train'])}, test={len(partition['test'])}")
 
     # partition = partition.with_transform(apply_transforms)
     partition["train"] = partition["train"].with_transform(

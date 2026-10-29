@@ -420,13 +420,20 @@ def evaluate(msg: Message, context: Context):
 
     elif algorithm == "floco":
         subregion_params = None
-        cfg = msg.content["config"]
+        cfg = msg.content.get("config", {})
         if "center" in cfg and "radius" in cfg:
             center_val = np.array(json.loads(cfg["center"]))
             radius_val = float(cfg["radius"])
             subregion_params = (center_val, radius_val)
-        trainer = get_trainer("floco")
-        eval_loss, eval_acc, eval_precision, eval_recall, eval_f1, eval_sensitivity, eval_specificity = trainer.evaluate(model, valloader, device, subregion_parameters=subregion_params)
+
+        if hasattr(model, "subregion_parameters"):
+            model.subregion_parameters = subregion_params
+
+        eval_loss, eval_acc, eval_precision, eval_recall, eval_f1, eval_sensitivity, eval_specificity = evaluate_model(
+            model,
+            valloader,
+            device,
+        )
 
     else:
         # Call the evaluation function
