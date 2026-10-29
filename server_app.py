@@ -211,19 +211,6 @@ def main(grid: Grid, context: Context) -> None:
     
     finally:
         wandb.finish()
-        
-    ##############################################
-    if context.run_config["save-model"]:
-        # Save final model to disk
-        print("\nSaving final model to disk...")
-        state_dict = result.arrays.to_torch_state_dict()
-
-        if algorithm in ("fedper", "fedrep"):
-            torch.save(state_dict, f"{algorithm}_shared_state.pt")
-            print(f"Saved {algorithm} shared parameters only. Client-specific heads are not included.")
-        else:
-            torch.save(state_dict, "final_model.pt")
-
 
 def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     """Evaluate model on central data."""
@@ -243,7 +230,10 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
         endpoints = floco_endpoints or 3
         model = convert_to_floco(model, endpoints=floco_endpoints, seed=seed)
 
-    model.load_state_dict(arrays.to_torch_state_dict())
+    # Use strict=True for models that don't have partial loading (e.g. resnet18_mlb, fedmlb).
+    # Use strict=False only for algorithms that send partial state dicts (fedpara, floco, moon).
+    needs_strict_false = algorithm in ("fedpara", "floco", "moon", "fedbn", "fedrep", "fedper")
+    model.load_state_dict(arrays.to_torch_state_dict(), strict=not needs_strict_false)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
@@ -276,7 +266,7 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
 
     # Save the metrics
     save_metrics(
-       test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity, algorithm=algorithm,
+       test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity, algorithm=algorithm, round_num=server_round,
     )
 
     return MetricRecord(metrics)

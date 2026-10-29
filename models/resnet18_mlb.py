@@ -6,7 +6,7 @@ from .base import BaseModel
 
 class ResNet18MLBModel(BaseModel):
     def build(self):
-        return ResNet18MLB(outputs=10)
+        return ResNet18MLB(outputs=2)
 
 def group_norm(channels: int) -> nn.Module:
     """Group Normalization used by the original FedMLB architecture."""
