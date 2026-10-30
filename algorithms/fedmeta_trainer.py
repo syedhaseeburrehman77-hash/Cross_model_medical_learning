@@ -13,6 +13,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
 
 from .base_trainer import BaseTrainer
+from utils.metrics import evaluate_model
 
 
 def split_support_query(dataloader: DataLoader, support_ratio: float = 0.2) -> Tuple[DataLoader, DataLoader]:
@@ -128,18 +129,7 @@ class FedAvgMetaTrainer(FedMetaBaseTrainer):
 
         # Evaluate adapted model on query set
         test_net.eval()
-        correct, total, eval_loss = 0, 0, 0.0
-        with torch.no_grad():
-            for batch in qry_loader:
-                images = batch["img"].to(device)
-                labels = batch["label"].to(device)
-                outputs = test_net(images)
-                eval_loss += criterion(outputs, labels).item() * labels.size(0)
-                preds = torch.max(outputs, 1)[1]
-                total += labels.size(0)
-                correct += (preds == labels).sum().item()
-
-        return eval_loss / max(total, 1), correct / max(total, 1)
+        return evaluate_model(test_net, qry_loader, device)
 
 
 class FedMetaMamlTrainer(FedMetaBaseTrainer):
@@ -166,15 +156,18 @@ class FedMetaMamlTrainer(FedMetaBaseTrainer):
                     continue
 
                 loss = criterion(train_net(images), labels)
+                # create_graph=False: first-order MAML approximation.
+                # We only need create_graph=True for the OUTER meta-gradient,
+                # not for the inner-loop adaptation steps — this saves ~10 GB RAM.
                 grads = torch.autograd.grad(
                     loss,
                     list(train_net.parameters()),
-                    create_graph=True,
-                    retain_graph=True,
+                    create_graph=False,
+                    retain_graph=False,
                 )
 
                 for param, g in zip(train_net.parameters(), grads):
-                    param.data = param.data - step_size * g
+                    param.data = param.data - step_size * g.detach()
 
                 for param in train_net.parameters():
                     if param.grad is not None:
@@ -226,32 +219,23 @@ class FedMetaMamlTrainer(FedMetaBaseTrainer):
                     continue
 
                 loss = criterion(test_net(images), labels)
+                # create_graph=False: evaluation only needs adapted weights,
+                # no outer meta-gradient is computed here — safe and memory-efficient.
                 grads = torch.autograd.grad(
                     loss,
                     list(test_net.parameters()),
-                    create_graph=True,
-                    retain_graph=True,
+                    create_graph=False,
+                    retain_graph=False,
                 )
                 for param, g in zip(test_net.parameters(), grads):
-                    param.data = param.data - self.alpha * g
+                    param.data = param.data - self.alpha * g.detach()
 
                 for param in test_net.parameters():
                     if param.grad is not None:
                         param.grad.zero_()
 
         test_net.eval()
-        correct, total, eval_loss = 0, 0, 0.0
-        with torch.no_grad():
-            for batch in qry_loader:
-                images = batch["img"].to(device)
-                labels = batch["label"].to(device)
-                outputs = test_net(images)
-                eval_loss += criterion(outputs, labels).item() * labels.size(0)
-                preds = torch.max(outputs, 1)[1]
-                total += labels.size(0)
-                correct += (preds == labels).sum().item()
-
-        return eval_loss / max(total, 1), correct / max(total, 1)
+        return evaluate_model(test_net, qry_loader, device)
 
 
 class FedMetaMetaSgdTrainer(FedMetaMamlTrainer):
@@ -287,15 +271,18 @@ class FedMetaMetaSgdTrainer(FedMetaMamlTrainer):
                     continue
 
                 loss = criterion(train_net(images), labels)
+                # create_graph=False: first-order approximation for inner-loop steps.
+                # The alpha vectors are updated by the outer meta-gradient on the query set,
+                # not by second-order gradients through the inner loop.
                 grads = torch.autograd.grad(
                     loss,
                     list(train_net.parameters()),
-                    create_graph=True,
-                    retain_graph=True,
+                    create_graph=False,
+                    retain_graph=False,
                 )
 
                 for param, g, a in zip(train_net.parameters(), grads, alphas):
-                    param.data = param.data - a * g
+                    param.data = param.data - a * g.detach()
 
                 for param in train_net.parameters():
                     if param.grad is not None:
