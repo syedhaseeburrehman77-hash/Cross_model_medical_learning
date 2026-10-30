@@ -8,7 +8,7 @@ from typing import Dict, Optional
 import torch
 from flwr.app import Array, ArrayRecord
 from flwr.serverapp.strategy import FedAvg
-
+import wandb
 from models import create_model
 
 
@@ -112,4 +112,16 @@ class FedMeta(FedAvg):
         self.current_arrays = ArrayRecord({k: Array(v.cpu().numpy()) for k, v in new_state.items()})
 
         metrics = self.train_metrics_aggr_fn([msg.content for msg in valid_replies], self.weighted_by_key)
+
+        grad_tensors = [
+            g.norm()
+            for g in aggregated_grads.values()
+            if torch.is_tensor(g) and g.is_floating_point()
+        ]
+        grad_norm = float(torch.norm(torch.stack(grad_tensors))) if grad_tensors else 0.0
+        log_payload = {"round": server_round, "fedmeta/grad_norm": grad_norm}
+        if self.algo == "fedmeta_meta_sgd" and self.alpha_dict is not None:
+            all_alphas = torch.cat([a.flatten() for a in self.alpha_dict.values()])
+            log_payload["fedmeta/alpha_mean"] = float(all_alphas.mean().item())
+        wandb.log(log_payload)
         return self.current_arrays, metrics

@@ -26,14 +26,16 @@ model_name = None
 algorithm = None
 moon_projection_dim = None
 floco_endpoints = None
+image_size = 224
 @app.main()
 
 def main(grid: Grid, context: Context) -> None:
     """Main entry point for the ServerApp."""
-    global model_name, algorithm, moon_projection_dim, floco_endpoints
+    global model_name, algorithm, moon_projection_dim, floco_endpoints, image_size
     algorithm = context.run_config["algorithm"]
     moon_projection_dim = context.run_config.get("moon-projection-dim", 84)
     floco_endpoints = context.run_config.get("endpoints", 3)
+    image_size = int(context.run_config.get("image-size", 224))
 
     # Read run config
     fraction_evaluate: float = context.run_config["fraction-evaluate"]
@@ -238,7 +240,7 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     model.to(device)
 
     # Load entire test set
-    test_dataloader = load_centralized_dataset()
+    test_dataloader = load_centralized_dataset(image_size=image_size)
 
     # Evaluate the global model on the test set
     test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity = evaluate_model(model, test_dataloader, device)

@@ -173,9 +173,15 @@ class FedMetaMamlTrainer(FedMetaBaseTrainer):
                     if param.grad is not None:
                         param.grad.zero_()
 
-        # 2. Outer loop evaluation on query loader
-        loss_sum = torch.tensor(0.0, device=device)
+        # 2. Outer loop: per-batch gradient accumulation.
+        # Old approach (accumulate loss_sum → single autograd.grad) retained
+        # ALL query batch graphs simultaneously in VRAM (~9 GB for client 0).
+        # New approach: loss.backward() per batch frees each graph immediately;
+        # peak VRAM stays at ONE batch graph (~25 MB) at a time.
+        train_net.zero_grad()
+        total_loss_val = 0.0
         total_samples = 0
+
         for batch in qry_loader:
             images = batch["img"].to(device)
             labels = batch["label"].to(device)
@@ -183,25 +189,34 @@ class FedMetaMamlTrainer(FedMetaBaseTrainer):
             if images.size(0) <= 1:
                 continue
 
+            n = labels.size(0)
             loss = criterion(train_net(images), labels)
-            loss_sum = loss_sum + loss * labels.size(0)
-            total_samples += labels.size(0)
+            # Weight by batch size so the final gradient is a sample-weighted average
+            (loss * n).backward()
+            total_loss_val += loss.item() * n
+            total_samples += n
 
-        loss_avg = loss_sum / max(total_samples, 1)
+        # Normalize accumulated gradients by total sample count
+        if total_samples > 0:
+            for param in train_net.parameters():
+                if param.grad is not None:
+                    param.grad /= total_samples
 
-        # 3. Outer loop meta-gradients
-        meta_grads = torch.autograd.grad(loss_avg, list(train_net.parameters()))
-
+        # 3. Collect meta-gradients from accumulated .grad attributes
         param_names = [k for k, v in model.named_parameters() if v.requires_grad]
-        self.last_gradients = {
-            name: g.detach().cpu()
-            for name, g in zip(param_names, meta_grads)
-        }
+        self.last_gradients = {}
+        for name, param in zip(param_names, train_net.parameters()):
+            self.last_gradients[name] = (
+                param.grad.detach().cpu() if param.grad is not None
+                else torch.zeros_like(param).cpu()
+            )
 
         for name, buf in model.named_buffers():
             self.last_gradients[name] = buf.detach().cpu()
 
-        return float(loss_avg.detach().item())
+        loss_avg = total_loss_val / max(total_samples, 1)
+        return float(loss_avg)
+
 
     def evaluate(self, model, valloader, device) -> Tuple[float, float]:
         """Meta-testing adaptation on support, test on query."""
@@ -288,9 +303,13 @@ class FedMetaMetaSgdTrainer(FedMetaMamlTrainer):
                     if param.grad is not None:
                         param.grad.zero_()
 
-        # 2. Outer loop evaluation on query loader
-        loss_sum = torch.tensor(0.0, device=device)
+        # 2. Outer loop: per-batch gradient accumulation (same fix as FedMetaMamlTrainer).
+        # Accumulating loss across all batches and calling autograd.grad() once
+        # would hold all query batch graphs in VRAM simultaneously (~9 GB OOM).
+        train_net.zero_grad()
+        total_loss_val = 0.0
         total_samples = 0
+
         for batch in qry_loader:
             images = batch["img"].to(device)
             labels = batch["label"].to(device)
@@ -298,21 +317,27 @@ class FedMetaMetaSgdTrainer(FedMetaMamlTrainer):
             if images.size(0) <= 1:
                 continue
 
+            n = labels.size(0)
             loss = criterion(train_net(images), labels)
-            loss_sum = loss_sum + loss * labels.size(0)
-            total_samples += labels.size(0)
+            (loss * n).backward()
+            total_loss_val += loss.item() * n
+            total_samples += n
 
-        loss_avg = loss_sum / max(total_samples, 1)
+        # Normalize accumulated gradients by total sample count
+        if total_samples > 0:
+            for param in train_net.parameters():
+                if param.grad is not None:
+                    param.grad /= total_samples
 
-        # 3. Outer loop meta-gradients
-        meta_grads = torch.autograd.grad(loss_avg, list(train_net.parameters()))
-
+        # 3. Collect meta-gradients; also use same grad for alpha (Meta-SGD update)
         self.last_gradients = {}
-        for name, g in zip(param_names, meta_grads):
-            self.last_gradients[name] = g.detach().cpu()
-            self.last_gradients[f"alpha.{name}"] = g.detach().cpu()
+        for name, param in zip(param_names, train_net.parameters()):
+            g = param.grad.detach().cpu() if param.grad is not None else torch.zeros_like(param).cpu()
+            self.last_gradients[name] = g
+            self.last_gradients[f"alpha.{name}"] = g
 
         for name, buf in model.named_buffers():
             self.last_gradients[name] = buf.detach().cpu()
 
-        return float(loss_avg.detach().item())
+        loss_avg = total_loss_val / max(total_samples, 1)
+        return float(loss_avg)

@@ -173,7 +173,8 @@ def train(msg: Message, context: Context):
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
     batch_size = context.run_config["batch-size"]
-    trainloader, testloader = load_data(partition_id, num_partitions, batch_size)
+    image_size = int(context.run_config.get("image-size", 224))
+    trainloader, testloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size)
 
     # Pull algorithm-specific kwargs (e.g. proximal_mu) straight from config —
     # trainers that don't need them just ignore extras via **kwargs
@@ -267,6 +268,15 @@ def train(msg: Message, context: Context):
                 scaffold_parameter_names, client_cv_new
             )
         })
+
+    elif algorithm in ("fedavg_meta", "fedmeta_maml", "fedmeta_meta_sgd"):
+        train_loss = trainer.train(
+            model,
+            trainloader,
+            context.run_config["local-epochs"],
+            msg.content["config"]["lr"],
+            device,
+        )
 
     else:
         train_loss = trainer.train(
@@ -405,7 +415,8 @@ def evaluate(msg: Message, context: Context):
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
     batch_size = context.run_config["batch-size"]
-    _, valloader = load_data(partition_id, num_partitions, batch_size)
+    image_size = int(context.run_config.get("image-size", 224))
+    _, valloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size)
 
     cfg = msg.content.get("config", {})
 
@@ -416,7 +427,7 @@ def evaluate(msg: Message, context: Context):
             gradient_step=context.run_config.get("fedmeta-gradient-step"),
             support_ratio=context.run_config.get("fedmeta-support-ratio"),
         )
-        eval_loss, eval_acc = trainer.evaluate(model, valloader, device)
+        eval_loss, eval_acc, eval_precision, eval_recall, eval_f1, eval_sensitivity, eval_specificity = trainer.evaluate(model, valloader, device)
 
     elif algorithm == "floco":
         subregion_params = None
