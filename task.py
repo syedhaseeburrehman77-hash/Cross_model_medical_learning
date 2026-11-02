@@ -55,15 +55,84 @@ def get_dataset():
 def load_data(partition_id: int, num_partitions: int, batch_size: int, image_size: int = 224):
 
     dataset = get_dataset()
-    partitioner = get_partitioner(num_partitions)
+    # partitioner = get_partitioner(num_partitions)
     
-    partitioner.dataset = dataset["train"]
-    partition = partitioner.load_partition(partition_id)
+    # partitioner.dataset = dataset["train"]
+    # partition = partitioner.load_partition(partition_id)
 
+
+    # Step 1: Assign modalities to clients
+    if num_partitions == 2:
+            modality_mapping = {
+                0: "MRI",
+                1: "CT",
+            }
+    elif num_partitions == 4:
+            modality_mapping = {
+                0: "MRI",
+                1: "MRI",
+                2: "CT",
+                3: "CT",
+            }
+    else:
+        raise ValueError("Expected 2 or 4 clients")
+        
+    if partition_id not in modality_mapping:
+        raise ValueError(f"Invalid partition ID: {partition_id}")
+    
+    modality = modality_mapping[partition_id]
+    
+    # Step 2: Filter dataset by modality
+    modality_dataset = dataset["train"].filter(
+        lambda x: x["modality"] == modality
+    )
+    
+    if num_partitions == 2:
+         # One client per modality: use the whole modality dataset
+        partition = modality_dataset
+    else:
+        # Step 3: Create partitioner with 2 partitions
+        partitioner = get_partitioner(2)
+    
+        partitioner.dataset = modality_dataset
+    
+        # Step 4: Map global client ID to local partition ID
+        local_partition_id = partition_id % 2
+    
+        # Step 5: Load client partition
+        partition = partitioner.load_partition(local_partition_id)
+
+    actual_modalities = Counter(partition["modality"])
+
+    print(
+        f"[Flower partition check] "
+        f"client_id={partition_id}, "
+        f"num_partitions={num_partitions}, "
+        f"expected={modality}, "
+        f"actual={actual_modalities}, "
+        f"labels={Counter(partition['label'])}, "
+        f"size={len(partition)}",
+        flush=True,
+    )
+
+    if set(actual_modalities.keys()) != {modality}:
+        raise ValueError(
+            f"Client {partition_id} expected only {modality}, "
+            f"but got {actual_modalities}"
+        )
+    
+    # Step 6: Verify distribution
+    print(f"\nClient ID: {partition_id}")
+    print(f"Assigned modality: {modality}")
+    print(f"Partition size: {len(partition)}")
+    print("Modality distribution:", Counter(partition["modality"]))
+    print("Label distribution:", Counter(partition["label"]))
+    
     print(f"Client {partition_id}: Partition size = {len(partition)}")
 
+
     # print(Counter(partition["modality"]))
-    print(Counter(partition["label"]))
+    #print(Counter(partition["label"]))
  
     partition = partition.train_test_split(test_size=0.15, seed=42,)
 

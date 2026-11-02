@@ -19,6 +19,7 @@ from utils.floco_helper import convert_to_floco
 from utils.scaffold_helper import get_num_supernodes, get_trainable_parameter_names
 from flwr.serverapp.strategy.strategy_utils import aggregate_metricrecords
 import wandb
+from pathlib import Path
 
 # Create ServerApp
 app = ServerApp()
@@ -33,6 +34,16 @@ def main(grid: Grid, context: Context) -> None:
     """Main entry point for the ServerApp."""
     global model_name, algorithm, moon_projection_dim, floco_endpoints, image_size
     algorithm = context.run_config["algorithm"]
+    # Clear the evaluation metrics CSV once at the beginning of this run
+    metrics_file = Path(f"results/evaluation_metrics_{algorithm}.csv")
+    metrics_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if metrics_file.exists():
+        metrics_file.unlink()
+
+    print(f"Started fresh metrics CSV: {metrics_file}")
+
+
     moon_projection_dim = context.run_config.get("moon-projection-dim", 84)
     floco_endpoints = context.run_config.get("endpoints", 3)
     image_size = int(context.run_config.get("image-size", 224))
@@ -268,7 +279,7 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
 
     # Save the metrics
     save_metrics(
-       test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity, algorithm=algorithm, round_num=server_round,
+       test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity, algorithm=algorithm,
     )
 
     return MetricRecord(metrics)

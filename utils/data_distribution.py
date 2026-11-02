@@ -53,11 +53,40 @@ def write_csv(rows, filepath):
 def export_data_distribution(dataset, num_partitions):
     """Export client train/validation and global test counts."""
     client_rows = []
-    partitioner = get_partitioner(num_partitions)
-    partitioner.dataset = dataset["train"]
+
+    if num_partitions == 2:
+        modality_mapping = {
+            0: "MRI",
+            1: "CT",
+        }
+    elif num_partitions == 4:
+        modality_mapping = {
+            0: "MRI",
+            1: "MRI",
+            2: "CT",
+            3: "CT",
+        }
+    else:
+        raise ValueError("Expected 2 or 4 clients")
 
     for client_id in range(num_partitions):
-        partition = partitioner.load_partition(client_id)
+        modality = modality_mapping[client_id]
+
+        # Filter the dataset to this client's modality
+        modality_dataset = dataset["train"].filter(
+            lambda x: x["modality"] == modality
+        )
+
+        if num_partitions == 2:
+            # Each client receives its full modality
+            partition = modality_dataset
+        else:
+            # Split each modality between its two clients
+            partitioner = get_partitioner(2)
+            partitioner.dataset = modality_dataset
+
+            local_partition_id = client_id % 2
+            partition = partitioner.load_partition(local_partition_id)
 
         local_split = partition.train_test_split(
             test_size=0.15,
@@ -65,7 +94,9 @@ def export_data_distribution(dataset, num_partitions):
         )
 
         client_rows.extend(
-            count_distribution(local_split["train"], client_id, "train")
+            count_distribution(
+                local_split["train"], client_id, "train"
+            )
         )
 
         client_rows.extend(
