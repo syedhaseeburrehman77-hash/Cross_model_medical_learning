@@ -2,6 +2,7 @@
 import torch
 import json
 import numpy as np
+from pathlib import Path
 from flwr.app import ArrayRecord, Context, Message, MetricRecord, RecordDict
 from flwr.clientapp import ClientApp
 
@@ -172,6 +173,13 @@ def train(msg: Message, context: Context):
     # Load the data
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
+    if num_partitions == 2:
+        modality = "MRI" if partition_id == 0 else "CT"
+    elif num_partitions == 4:
+        modality = "MRI" if partition_id in (0, 1) else "CT"
+    else:
+        modality = f"Client_{partition_id}"
+
     batch_size = context.run_config["batch-size"]
     image_size = int(context.run_config.get("image-size", 224))
     trainloader, testloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size)
@@ -204,6 +212,7 @@ def train(msg: Message, context: Context):
         gradient_step=context.run_config.get("fedmeta-gradient-step", 5),
         support_ratio=context.run_config.get("fedmeta-support-ratio", 0.2),
         pers_lamda=context.run_config.get("pers_lamda", 0.0),
+        proto_lambda=context.run_config.get("proto-lambda", 1.0),
     )
 
     # Call the training function
@@ -317,6 +326,33 @@ def train(msg: Message, context: Context):
         print(f"[FedPer] Client {partition_id}: saved personalized head "
             f"with {len(head_state)} tensors")
 
+    # Class Prototypes according to client's local data distribution
+    compute_prototypes = context.run_config.get("compute-prototypes", True)
+    if compute_prototypes:
+        from utils.prototype_helper import compute_class_prototypes
+        try:
+            client_protos, class_counts = compute_class_prototypes(model, trainloader, device)
+            proto_dir = Path("results/prototypes")
+            proto_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save client prototypes
+            proto_data = {
+                "prototypes": client_protos,
+                "counts": class_counts,
+                "partition_id": partition_id,
+                "modality": modality,
+            }
+            torch.save(proto_data, proto_dir / f"client_{partition_id}_latest_prototype.pt")
+            
+            # Log clear summary for the client
+            print(f"[Prototype] Client {partition_id} ({modality}): computed prototypes for classes {sorted(list(client_protos.keys()))}")
+            for c in sorted(list(client_protos.keys())):
+                p = client_protos[c]
+                c_name = "Tumor" if c == 1 else "Healthy"
+                print(f"  └── Class {c} ({c_name}): count={class_counts.get(c, 0)}, dim={p.shape[0]}, norm={p.norm().item():.4f}")
+        except Exception as e:
+            print(f"[Prototype Warning] Failed to compute client {partition_id} prototypes: {e}")
+
     # Construct and return reply Message
     if algorithm == "fedbn":
         model_record = ArrayRecord(get_fedbn_state_dict(model))
@@ -414,6 +450,13 @@ def evaluate(msg: Message, context: Context):
     # Load the data
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
+    if num_partitions == 2:
+        modality = "MRI" if partition_id == 0 else "CT"
+    elif num_partitions == 4:
+        modality = "MRI" if partition_id in (0, 1) else "CT"
+    else:
+        modality = f"Client_{partition_id}"
+
     batch_size = context.run_config["batch-size"]
     image_size = int(context.run_config.get("image-size", 224))
     _, valloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size)

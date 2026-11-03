@@ -282,6 +282,22 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
        test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity, algorithm=algorithm,
     )
 
+    # Class Prototypes Aggregation & Similarity Analysis
+    from utils.prototype_helper import aggregate_and_export_round_prototypes
+    try:
+        num_nodes = get_num_supernodes()
+        global_protos, sims = aggregate_and_export_round_prototypes(
+            round_num=server_round,
+            num_partitions=num_nodes,
+            output_dir="results",
+        )
+        if global_protos:
+            print(f"\n[Global Prototypes] Round {server_round}: Aggregated across {num_nodes} clients for classes {sorted(list(global_protos.keys()))}")
+            for k, v in sims.items():
+                print(f"  ├── Similarity {k}: {v:.4f}")
+    except Exception as e:
+        print(f"[Prototype Warning] Could not aggregate prototypes for round {server_round}: {e}")
+
     return MetricRecord(metrics)
 
 

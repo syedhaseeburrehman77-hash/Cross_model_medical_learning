@@ -26,6 +26,8 @@ STRATEGY_REGISTRY = {
     "fedavg_meta": FedAvg,      
     "fedmeta_maml": FedMeta,    
     "fedmeta_meta_sgd": FedMeta,
+    # --- Prototype-based FL ---
+    "fedproto": FedAvg,
 }
 
 def get_strategy(algorithm: str, **kwargs):
