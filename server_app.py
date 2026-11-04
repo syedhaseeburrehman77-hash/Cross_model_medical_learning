@@ -18,6 +18,7 @@ from utils.fedper_helper import get_fedper_shared_state_dict
 from utils.floco_helper import convert_to_floco
 from utils.scaffold_helper import get_num_supernodes, get_trainable_parameter_names
 from flwr.serverapp.strategy.strategy_utils import aggregate_metricrecords
+from utils.prototype_helper import aggregate_and_export_round_prototypes
 import wandb
 from pathlib import Path
 
@@ -182,6 +183,10 @@ def main(grid: Grid, context: Context) -> None:
         strategy_kwargs["parameter_names"] =  get_trainable_parameter_names(global_model)
         strategy_kwargs["num_clients"] = get_num_supernodes()
 
+    elif algorithm == "fedpac":
+        strategy_kwargs["fedpac_lambda"] = context.run_config.get("fedpac-lambda")
+        strategy_kwargs["fedpac_tau"] = context.run_config.get("fedpac-tau")
+
     strategy = get_strategy(algorithm, **strategy_kwargs)
 
     if algorithm in ("fedbn", "fedrep", "fedper"):
@@ -199,28 +204,28 @@ def main(grid: Grid, context: Context) -> None:
     )
 
     try:
-
+        
         # Start strategy, run for `num_rounds`
         result = strategy.start(
-            grid=grid,
-            initial_arrays=arrays,
-            train_config=ConfigRecord({"lr": lr}),
-            num_rounds=num_rounds,
-            evaluate_fn=evaluate_fn,
-        )
+                grid=grid,
+                initial_arrays=arrays,
+                train_config=ConfigRecord({"lr": lr}),
+                num_rounds=num_rounds,
+                evaluate_fn=evaluate_fn,
+            )
 
         if context.run_config["save-model"]:
-            print("\nSaving final model to disk...")
-            state_dict = result.arrays.to_torch_state_dict()
+                print("\nSaving final model to disk...")
+                state_dict = result.arrays.to_torch_state_dict()
 
-            if algorithm in ("fedper", "fedrep"):
-                torch.save(state_dict, f"{algorithm}_shared_state.pt")
-                print(
-                    f"Saved {algorithm} shared parameters only. "
-                    "Client-specific heads are not included."
-                )
-            else:
-                torch.save(state_dict, "final_model.pt")
+                if algorithm in ("fedper", "fedrep", "fedpac"):
+                    torch.save(state_dict, f"{algorithm}_shared_state.pt")
+                    print(
+                        f"Saved {algorithm} shared parameters only. "
+                        "Client-specific heads are not included."
+                    )
+                else:
+                    torch.save(state_dict, "final_model.pt")
     
     finally:
         wandb.finish()
@@ -245,7 +250,7 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
 
     # Use strict=True for models that don't have partial loading (e.g. resnet18_mlb, fedmlb).
     # Use strict=False only for algorithms that send partial state dicts (fedpara, floco, moon).
-    needs_strict_false = algorithm in ("fedpara", "floco", "moon", "fedbn", "fedrep", "fedper")
+    needs_strict_false = algorithm in ("fedpara", "floco", "moon", "fedbn", "fedrep", "fedper", "fedpac")
     model.load_state_dict(arrays.to_torch_state_dict(), strict=not needs_strict_false)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -283,7 +288,6 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     )
 
     # Class Prototypes Aggregation & Similarity Analysis
-    from utils.prototype_helper import aggregate_and_export_round_prototypes
     try:
         num_nodes = get_num_supernodes()
         global_protos, sims = aggregate_and_export_round_prototypes(

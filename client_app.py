@@ -19,6 +19,8 @@ from utils.fedrep_helper import get_fedrep_head_state_dict, get_fedrep_shared_st
 from utils.moon_helper import prepare_moon_model
 from utils.fedper_helper import get_fedper_head_state_dict, get_fedper_shared_state_dict, load_fedper_head_state_dict
 from utils.floco_helper import convert_to_floco
+from utils.prototype_helper import compute_class_prototypes
+from utils.fedpac_helper import load_classifier_head
 
 def check_finite_state(state, stage):
     for name, tensor in state.items():
@@ -164,6 +166,23 @@ def train(msg: Message, context: Context):
         else:
             print(f"[FedPer] Client {context.node_config['partition-id']}: no previous head; using initialized head")
 
+    elif algorithm == "fedpac":
+        model.load_state_dict(received_state, strict=False)
+        collab_file = Path("results/fedpac") / f"client_{context.node_config['partition-id']}_collab_head.pt"
+        if collab_file.exists():
+            try:
+                head_state = torch.load(collab_file, weights_only=False)
+                load_classifier_head(model, head_state)
+                print(f"[FedPAC] Client {context.node_config['partition-id']}: collaborative head LOADED from server")
+            except Exception:
+                pass
+        elif "fedpac_head_state" in context.state:
+            head_state = context.state["fedpac_head_state"].to_torch_state_dict()
+            load_classifier_head(model, head_state)
+            print(f"[FedPAC] Client {context.node_config['partition-id']}: local head RESTORED")
+        else:
+            print(f"[FedPAC] Client {context.node_config['partition-id']}: initial head initialized")
+
     else:
         model.load_state_dict(received_state)
         
@@ -196,6 +215,18 @@ def train(msg: Message, context: Context):
             client_cv=scaffold_client_cv,
         )
     else:
+        # Load global prototypes for FedPAC feature alignment
+        fedpac_global_protos = None
+        if algorithm == "fedpac":
+            proto_files = sorted(list(Path("results/fedpac").glob("global_prototypes_round_*.pt"))) if Path("results/fedpac").exists() else []
+            if proto_files:
+                try:
+                    p_data = torch.load(proto_files[-1], weights_only=False)
+                    fedpac_global_protos = p_data.get("global_prototypes")
+                    print(f"[FedPAC] Client {partition_id}: loaded {len(fedpac_global_protos)} global prototypes for feature alignment")
+                except Exception:
+                    pass
+
         head_name = "classifier" if hasattr(model, "classifier") else "fc3"
         trainer = get_trainer(
         algorithm,
@@ -213,6 +244,8 @@ def train(msg: Message, context: Context):
         support_ratio=context.run_config.get("fedmeta-support-ratio", 0.2),
         pers_lamda=context.run_config.get("pers_lamda", 0.0),
         proto_lambda=context.run_config.get("proto-lambda", 1.0),
+        fedpac_lambda=context.run_config.get("fedpac-lambda", 1.0),
+        global_prototypes=fedpac_global_protos if algorithm == "fedpac" else None,
     )
 
     # Call the training function
@@ -329,7 +362,6 @@ def train(msg: Message, context: Context):
     # Class Prototypes according to client's local data distribution
     compute_prototypes = context.run_config.get("compute-prototypes", True)
     if compute_prototypes:
-        from utils.prototype_helper import compute_class_prototypes
         try:
             client_protos, class_counts = compute_class_prototypes(model, trainloader, device)
             proto_dir = Path("results/prototypes")
@@ -441,6 +473,19 @@ def evaluate(msg: Message, context: Context):
         if "fedper_head_state" in context.state:
             head_state = context.state["fedper_head_state"].to_torch_state_dict()
             load_fedper_head_state_dict(model, head_state)
+
+    elif algorithm == "fedpac":
+        model.load_state_dict(received_state, strict=False)
+        collab_file = Path("results/fedpac") / f"client_{context.node_config['partition-id']}_collab_head.pt"
+        if collab_file.exists():
+            try:
+                head_state = torch.load(collab_file, weights_only=False)
+                load_classifier_head(model, head_state)
+            except Exception:
+                pass
+        elif "fedpac_head_state" in context.state:
+            head_state = context.state["fedpac_head_state"].to_torch_state_dict()
+            load_classifier_head(model, head_state)
 
     else:
         model.load_state_dict(received_state,)
