@@ -15,6 +15,7 @@ from utils.fedpara_helper import convert_to_fedpara
 from utils.fedrep_helper import get_fedrep_shared_state_dict
 from utils.moon_helper import prepare_moon_model
 from utils.fedper_helper import get_fedper_shared_state_dict
+from utils.fedlc_helper import get_fedlc_shared_state_dict
 from utils.floco_helper import convert_to_floco
 from utils.scaffold_helper import get_num_supernodes, get_trainable_parameter_names
 from flwr.serverapp.strategy.strategy_utils import aggregate_metricrecords
@@ -96,6 +97,9 @@ def main(grid: Grid, context: Context) -> None:
 
     elif algorithm == "fedper":
         arrays = ArrayRecord(get_fedper_shared_state_dict(global_model))
+
+    elif algorithm == "fedlc":
+        arrays = ArrayRecord(get_fedlc_shared_state_dict(global_model))
     
     else:
         arrays = ArrayRecord(global_model.state_dict())
@@ -187,9 +191,14 @@ def main(grid: Grid, context: Context) -> None:
         strategy_kwargs["fedpac_lambda"] = context.run_config.get("fedpac-lambda")
         strategy_kwargs["fedpac_tau"] = context.run_config.get("fedpac-tau")
 
+    elif algorithm == "fedlc":
+        strategy_kwargs["alpha"] = context.run_config.get("fedlc-alpha")
+        strategy_kwargs["pcs"] = context.run_config.get("fedlc-pcs")
+        strategy_kwargs["hc"] = context.run_config.get("fedlc-hc")
+
     strategy = get_strategy(algorithm, **strategy_kwargs)
 
-    if algorithm in ("fedbn", "fedrep", "fedper"):
+    if algorithm in ("fedbn", "fedrep", "fedper", "fedlc"):
         evaluate_fn = None
     else:
         evaluate_fn = global_evaluate
@@ -218,7 +227,7 @@ def main(grid: Grid, context: Context) -> None:
                 print("\nSaving final model to disk...")
                 state_dict = result.arrays.to_torch_state_dict()
 
-                if algorithm in ("fedper", "fedrep", "fedpac"):
+                if algorithm in ("fedper", "fedrep", "fedpac", "fedlc"):
                     torch.save(state_dict, f"{algorithm}_shared_state.pt")
                     print(
                         f"Saved {algorithm} shared parameters only. "
@@ -250,7 +259,7 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
 
     # Use strict=True for models that don't have partial loading (e.g. resnet18_mlb, fedmlb).
     # Use strict=False only for algorithms that send partial state dicts (fedpara, floco, moon).
-    needs_strict_false = algorithm in ("fedpara", "floco", "moon", "fedbn", "fedrep", "fedper", "fedpac")
+    needs_strict_false = algorithm in ("fedpara", "floco", "moon", "fedbn", "fedrep", "fedper", "fedpac", "fedlc")
     model.load_state_dict(arrays.to_torch_state_dict(), strict=not needs_strict_false)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)

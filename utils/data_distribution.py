@@ -54,6 +54,7 @@ def export_data_distribution(dataset, num_partitions):
     """Export client train/validation and global test counts."""
     client_rows = []
 
+    half = max(num_partitions // 2, 1)
     if num_partitions == 2:
         modality_mapping = {
             0: "MRI",
@@ -67,7 +68,7 @@ def export_data_distribution(dataset, num_partitions):
             3: "CT",
         }
     else:
-        raise ValueError("Expected 2 or 4 clients")
+        modality_mapping = {i: ("MRI" if i < half else "CT") for i in range(num_partitions)}
 
     for client_id in range(num_partitions):
         modality = modality_mapping[client_id]
@@ -77,15 +78,18 @@ def export_data_distribution(dataset, num_partitions):
             lambda x: x["modality"] == modality
         )
 
-        if num_partitions == 2:
-            # Each client receives its full modality
+        if client_id < half:
+            modality_clients = half
+            local_partition_id = client_id
+        else:
+            modality_clients = num_partitions - half
+            local_partition_id = client_id - half
+
+        if modality_clients <= 1:
             partition = modality_dataset
         else:
-            # Split each modality between its two clients
-            partitioner = get_partitioner(2)
+            partitioner = get_partitioner(modality_clients)
             partitioner.dataset = modality_dataset
-
-            local_partition_id = client_id % 2
             partition = partitioner.load_partition(local_partition_id)
 
         local_split = partition.train_test_split(

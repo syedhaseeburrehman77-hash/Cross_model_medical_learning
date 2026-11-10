@@ -21,6 +21,7 @@ from utils.fedper_helper import get_fedper_head_state_dict, get_fedper_shared_st
 from utils.floco_helper import convert_to_floco
 from utils.prototype_helper import compute_class_prototypes
 from utils.fedpac_helper import load_classifier_head
+from utils.fedlc_helper import get_fedlc_head_state_dict, get_fedlc_shared_state_dict, load_fedlc_head_state_dict
 
 def check_finite_state(state, stage):
     for name, tensor in state.items():
@@ -179,9 +180,15 @@ def train(msg: Message, context: Context):
         elif "fedpac_head_state" in context.state:
             head_state = context.state["fedpac_head_state"].to_torch_state_dict()
             load_classifier_head(model, head_state)
-            print(f"[FedPAC] Client {context.node_config['partition-id']}: local head RESTORED")
+
+    elif algorithm == "fedlc":
+        model.load_state_dict(received_state, strict=False)
+        if "fedlc_head_state" in context.state:
+            head_state = context.state["fedlc_head_state"].to_torch_state_dict()
+            load_fedlc_head_state_dict(model, head_state)
+            print(f"[FedLC] Client {context.node_config['partition-id']}: local head & calibration RESTORED")
         else:
-            print(f"[FedPAC] Client {context.node_config['partition-id']}: initial head initialized")
+            print(f"[FedLC] Client {context.node_config['partition-id']}: initial head & calibration initialized")
 
     else:
         model.load_state_dict(received_state)
@@ -232,20 +239,22 @@ def train(msg: Message, context: Context):
         algorithm,
         head_module_name=head_name,
         proximal_mu=msg.content["config"].get("proximal_mu", 0.0),
-        head_epochs=msg.content["config"].get("fedrep-head-epochs", 1),
+        head_epochs=msg.content["config"].get("fedlc-head-epochs", msg.content["config"].get("fedrep-head-epochs", 1)),
         mu=context.run_config.get("moon-mu", 1.0),
         temperature=context.run_config.get("moon-temperature", 0.5),
         global_model=global_model,
         lambda_1=context.run_config.get("fedmlb-lambda-1", 1.0),
         lambda_2=context.run_config.get("fedmlb-lambda-2", 1.0),
         alpha_state=alpha_state,
-        alpha=context.run_config.get("fedmeta-alpha", 0.01),
+        alpha=context.run_config.get("fedlc-alpha", context.run_config.get("fedmeta-alpha", 0.01)),
         gradient_step=context.run_config.get("fedmeta-gradient-step", 5),
         support_ratio=context.run_config.get("fedmeta-support-ratio", 0.2),
         pers_lamda=context.run_config.get("pers_lamda", 0.0),
         proto_lambda=context.run_config.get("proto-lambda", 1.0),
         fedpac_lambda=context.run_config.get("fedpac-lambda", 1.0),
         global_prototypes=fedpac_global_protos if algorithm == "fedpac" else None,
+        pcs=context.run_config.get("fedlc-pcs", True),
+        hc=context.run_config.get("fedlc-hc", True),
     )
 
     # Call the training function
@@ -359,6 +368,12 @@ def train(msg: Message, context: Context):
         print(f"[FedPer] Client {partition_id}: saved personalized head "
             f"with {len(head_state)} tensors")
 
+    elif algorithm == "fedlc":
+        head_state = get_fedlc_head_state_dict(model)
+        context.state["fedlc_head_state"] = ArrayRecord(head_state)
+        print(f"[FedLC] Client {partition_id}: saved personalized head/calibration "
+            f"with {len(head_state)} tensors")
+
     # Class Prototypes according to client's local data distribution
     compute_prototypes = context.run_config.get("compute-prototypes", True)
     if compute_prototypes:
@@ -392,6 +407,8 @@ def train(msg: Message, context: Context):
         model_record = ArrayRecord(get_fedrep_shared_state_dict(model))
     elif algorithm == "fedper":
         model_record = ArrayRecord(get_fedper_shared_state_dict(model))
+    elif algorithm == "fedlc":
+        model_record = ArrayRecord(get_fedlc_shared_state_dict(model))
     elif algorithm in ("fedmeta_maml", "fedmeta_meta_sgd"):
         model_record = ArrayRecord(trainer.get_gradients())    
     elif algorithm == "scaffold":
@@ -486,6 +503,12 @@ def evaluate(msg: Message, context: Context):
         elif "fedpac_head_state" in context.state:
             head_state = context.state["fedpac_head_state"].to_torch_state_dict()
             load_classifier_head(model, head_state)
+
+    elif algorithm == "fedlc":
+        model.load_state_dict(received_state, strict=False)
+        if "fedlc_head_state" in context.state:
+            head_state = context.state["fedlc_head_state"].to_torch_state_dict()
+            load_fedlc_head_state_dict(model, head_state)
 
     else:
         model.load_state_dict(received_state,)

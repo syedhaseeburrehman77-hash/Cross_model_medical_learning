@@ -42,7 +42,7 @@ serverapp = "server_app:app"
 clientapp = "client_app:app"
 
 [tool.flwr.app.config]
-num-server-rounds = 1
+num-server-rounds = 10
 fraction-evaluate = 1.0
 local-epochs = 1
 learning-rate = 0.001
@@ -50,7 +50,7 @@ batch-size = 8
 save-model = false
 fraction-fit = 1.0
 min-available-clients = 2
-algorithm = "fedpac"
+algorithm = "fedlc"
 proximal-mu = 0.01
 server-learning-rate = 0.1
 server-momentum = 0.5
@@ -76,6 +76,10 @@ compute-prototypes = true
 proto-lambda = 1.0
 fedpac-lambda = 1.0
 fedpac-tau = 1.0
+fedlc-head-epochs = 1
+fedlc-alpha = 0.01
+fedlc-pcs = true
+fedlc-hc = true
 
 [partition]
 type = "dirichlet"   # options: iid, dirichlet, shard

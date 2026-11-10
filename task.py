@@ -62,20 +62,21 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, image_siz
 
 
     # Step 1: Assign modalities to clients
+    half = max(num_partitions // 2, 1)
     if num_partitions == 2:
-            modality_mapping = {
-                0: "MRI",
-                1: "CT",
-            }
+        modality_mapping = {
+            0: "MRI",
+            1: "CT",
+        }
     elif num_partitions == 4:
-            modality_mapping = {
-                0: "MRI",
-                1: "MRI",
-                2: "CT",
-                3: "CT",
-            }
+        modality_mapping = {
+            0: "MRI",
+            1: "MRI",
+            2: "CT",
+            3: "CT",
+        }
     else:
-        raise ValueError("Expected 2 or 4 clients")
+        modality_mapping = {i: ("MRI" if i < half else "CT") for i in range(num_partitions)}
         
     if partition_id not in modality_mapping:
         raise ValueError(f"Invalid partition ID: {partition_id}")
@@ -87,19 +88,19 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, image_siz
         lambda x: x["modality"] == modality
     )
     
-    if num_partitions == 2:
-         # One client per modality: use the whole modality dataset
+    if partition_id < half:
+        modality_clients = half
+        local_partition_id = partition_id
+    else:
+        modality_clients = num_partitions - half
+        local_partition_id = partition_id - half
+
+    if modality_clients <= 1:
+        # One client for this modality: use full modality dataset
         partition = modality_dataset
     else:
-        # Step 3: Create partitioner with 2 partitions
-        partitioner = get_partitioner(2)
-    
+        partitioner = get_partitioner(modality_clients)
         partitioner.dataset = modality_dataset
-    
-        # Step 4: Map global client ID to local partition ID
-        local_partition_id = partition_id % 2
-    
-        # Step 5: Load client partition
         partition = partitioner.load_partition(local_partition_id)
 
     actual_modalities = Counter(partition["modality"])
