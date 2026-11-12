@@ -18,6 +18,8 @@ class MoonTrainer(BaseTrainer):
         self,
         mu: float = 1.0,
         temperature: float = 0.5,
+        momentum: float = 0.9,
+        weight_decay: float = 1e-5,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -25,6 +27,8 @@ class MoonTrainer(BaseTrainer):
             raise ValueError("MOON temperature must be greater than zero.")
         self.mu = mu
         self.temperature = temperature
+        self.momentum = momentum
+        self.weight_decay = weight_decay
         self.last_ce_loss = 0.0
         self.last_con_loss = 0.0
 
@@ -43,36 +47,37 @@ class MoonTrainer(BaseTrainer):
     ) -> float:
         """Train with classification loss plus the MOON contrastive loss."""
         global_model = copy.deepcopy(model)
-        previous_model = copy.deepcopy(model)
+        has_previous = previous_state_dict is not None
+        previous_model = None
 
-        if previous_state_dict is not None:
+        if has_previous:
+            previous_model = copy.deepcopy(model)
             previous_model.load_state_dict(previous_state_dict, strict=True)
+            previous_model.to(device)
+            previous_model.eval()
+            for parameter in previous_model.parameters():
+                parameter.requires_grad_(False)
 
         model.to(device)
         global_model.to(device)
-        previous_model.to(device)
 
         model.train()
         global_model.eval()
-        previous_model.eval()
 
         for parameter in global_model.parameters():
-            parameter.requires_grad_(False)
-
-        for parameter in previous_model.parameters():
             parameter.requires_grad_(False)
 
         optimizer = torch.optim.SGD(
             model.parameters(),
             lr=lr,
-            momentum=0.9,
-            weight_decay=1e-5,
+            momentum=self.momentum,
+            weight_decay=self.weight_decay,
         )
         criterion = torch.nn.CrossEntropyLoss().to(device)
 
         local_forward = MoonFeatureForward(model)
         global_forward = MoonFeatureForward(global_model)
-        previous_forward = MoonFeatureForward(previous_model)
+        previous_forward = MoonFeatureForward(previous_model) if has_previous else None
 
         total_loss = 0.0
         total_ce_loss = 0.0     
@@ -91,18 +96,25 @@ class MoonTrainer(BaseTrainer):
 
                     with torch.no_grad():
                         _, global_projection, _ = global_forward.forward(images)
-                        _, previous_projection, _ = previous_forward.forward(images)
-
-                    pos_sim = F.cosine_similarity(local_projection, global_projection, dim=-1)
-                    neg_sim = F.cosine_similarity(local_projection, previous_projection, dim=-1)
-
-                    contrastive_logits = torch.stack((pos_sim, neg_sim), dim=1) / self.temperature
-                    contrastive_targets = torch.zeros(images.size(0), dtype=torch.long, device=device)
 
                     loss_ce = criterion(logits, labels)
-                    loss_con = criterion(contrastive_logits, contrastive_targets)
 
-                    loss = loss_ce + self.mu * loss_con
+                    if has_previous and previous_forward is not None:
+                        with torch.no_grad():
+                            _, previous_projection, _ = previous_forward.forward(images)
+
+                        pos_sim = F.cosine_similarity(local_projection, global_projection, dim=-1)
+                        neg_sim = F.cosine_similarity(local_projection, previous_projection, dim=-1)
+
+                        contrastive_logits = torch.stack((pos_sim, neg_sim), dim=1) / self.temperature
+                        contrastive_targets = torch.zeros(images.size(0), dtype=torch.long, device=device)
+
+                        loss_con = criterion(contrastive_logits, contrastive_targets)
+                        loss = loss_ce + self.mu * loss_con
+                    else:
+                        loss_con = torch.tensor(0.0, device=device)
+                        loss = loss_ce
+
                     loss.backward()
                     optimizer.step()
 
@@ -118,7 +130,8 @@ class MoonTrainer(BaseTrainer):
         finally:
             local_forward.close()
             global_forward.close()
-            previous_forward.close()
+            if previous_forward is not None:
+                previous_forward.close()
 
         return total_loss / max(num_batches, 1)
 

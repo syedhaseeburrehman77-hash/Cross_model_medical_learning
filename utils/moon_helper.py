@@ -21,8 +21,27 @@ class MoonProjectionHead(nn.Module):
         return self.l2(features)
 
 
-def _find_last_classifier(model: nn.Module) -> Tuple[str, nn.Linear]:
-    """Find the final Linear layer of the model."""
+def _find_feature_module(model: nn.Module) -> Tuple[str, nn.Module, int]:
+    """Find the classification head entry point and its input feature dimension.
+    This captures features BEFORE any classifier layers or classifier dropout,
+    extracting the clean backbone representation as in the official MOON baseline.
+    """
+    if hasattr(model, "classifier"):
+        target_name = "classifier"
+        target_module = model.classifier
+        if isinstance(target_module, nn.Sequential):
+            for sub_module in target_module:
+                if isinstance(sub_module, nn.Linear):
+                    return target_name, target_module, sub_module.in_features
+        elif isinstance(target_module, nn.Linear):
+            return target_name, target_module, target_module.in_features
+
+    if hasattr(model, "fc3") and isinstance(model.fc3, nn.Linear):
+        return "fc3", model.fc3, model.fc3.in_features
+
+    if hasattr(model, "fc") and isinstance(model.fc, nn.Linear):
+        return "fc", model.fc, model.fc.in_features
+
     linear_layers = [
         (name, module)
         for name, module in model.named_modules()
@@ -30,10 +49,10 @@ def _find_last_classifier(model: nn.Module) -> Tuple[str, nn.Linear]:
     ]
     if not linear_layers:
         raise ValueError("MOON requires a model containing at least one nn.Linear layer.")
-    return linear_layers[-1]
+    return linear_layers[0][0], linear_layers[0][1], linear_layers[0][1].in_features
 
 
-def prepare_moon_model(model: nn.Module, projection_dim: int) -> nn.Module:
+def prepare_moon_model(model: nn.Module, projection_dim: int = 256) -> nn.Module:
     """Attach the MOON projection head to an existing model.
     The projection head becomes part of model.state_dict(), so Flower sends,
     aggregates, and restores it automatically.
@@ -41,20 +60,20 @@ def prepare_moon_model(model: nn.Module, projection_dim: int) -> nn.Module:
     if hasattr(model, "moon_projector"):
         return model
 
-    classifier_name, classifier = _find_last_classifier(model)
+    feature_module_name, _, in_features = _find_feature_module(model)
     model.add_module(
         "moon_projector",
         MoonProjectionHead(
-            input_dim=classifier.in_features,
+            input_dim=in_features,
             projection_dim=projection_dim,
         ),
     )
-    model._moon_classifier_name = classifier_name
+    model._moon_feature_module_name = feature_module_name
     return model
 
 
 class MoonFeatureForward:
-    """Captures the features passed into the final classifier during forward()."""
+    """Captures the backbone features passed into the classifier during forward()."""
 
     def __init__(self, model: nn.Module):
         if not hasattr(model, "moon_projector"):
@@ -63,10 +82,12 @@ class MoonFeatureForward:
             )
         self.model = model
         self.features = None
-        classifier_name = model._moon_classifier_name
-        modules = dict(model.named_modules())
-        classifier = modules[classifier_name]
-        self.hook = classifier.register_forward_pre_hook(self._capture_features)
+        feature_module_name = getattr(model, "_moon_feature_module_name", None)
+        if feature_module_name is not None and hasattr(model, feature_module_name):
+            target_module = getattr(model, feature_module_name)
+        else:
+            _, target_module, _ = _find_feature_module(model)
+        self.hook = target_module.register_forward_pre_hook(self._capture_features)
 
     def _capture_features(self, _module, inputs) -> None:
         features = inputs[0]
@@ -79,7 +100,7 @@ class MoonFeatureForward:
         self.features = None
         logits = self.model(images)
         if self.features is None:
-            raise RuntimeError("MOON could not capture classifier input features.")
+            raise RuntimeError("MOON could not capture backbone features.")
         projection = self.model.moon_projector(self.features)
         return self.features, projection, logits
 

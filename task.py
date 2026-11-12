@@ -11,12 +11,12 @@ def get_transforms(train=True, image_size=224):
         return transforms.Compose([
             transforms.Lambda(lambda img: img.convert("RGB")),
             transforms.Resize(size),
-            # transforms.RandomHorizontalFlip(),
-            # transforms.RandomRotation(15),
-            # transforms.ColorJitter(
-            # brightness=0.2,
-            #   contrast=0.2
-            #),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(15),
+            transforms.ColorJitter(
+            brightness=0.2,
+               contrast=0.2
+            ),
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406],
@@ -83,9 +83,9 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, image_siz
     
     modality = modality_mapping[partition_id]
     
-    # Step 2: Filter dataset by modality
+    # Step 2: Filter dataset by modality (using input_columns avoids decoding images and prevents MemoryError)
     modality_dataset = dataset["train"].filter(
-        lambda x: x["modality"] == modality
+        lambda mod: mod == modality, input_columns=["modality"]
     )
     
     if partition_id < half:
