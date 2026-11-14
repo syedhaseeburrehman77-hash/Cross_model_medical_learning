@@ -409,8 +409,6 @@ def train(msg: Message, context: Context):
         model_record = ArrayRecord(get_fedrep_shared_state_dict(model))
     elif algorithm == "fedper":
         model_record = ArrayRecord(get_fedper_shared_state_dict(model))
-    elif algorithm == "fedlc":
-        model_record = ArrayRecord(get_fedlc_shared_state_dict(model))
     elif algorithm in ("fedmeta_maml", "fedmeta_meta_sgd"):
         model_record = ArrayRecord(trainer.get_gradients())    
     elif algorithm == "scaffold":

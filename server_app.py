@@ -101,9 +101,6 @@ def main(grid: Grid, context: Context) -> None:
 
     elif algorithm == "fedper":
         arrays = ArrayRecord(get_fedper_shared_state_dict(global_model))
-
-    elif algorithm == "fedlc":
-        arrays = ArrayRecord(get_fedlc_shared_state_dict(global_model))
     
     else:
         arrays = ArrayRecord(global_model.state_dict())
@@ -204,7 +201,7 @@ def main(grid: Grid, context: Context) -> None:
 
     strategy = get_strategy(algorithm, **strategy_kwargs)
 
-    if algorithm in ("fedbn", "fedrep", "fedper", "fedlc"):
+    if algorithm in ("fedbn", "fedrep", "fedper"):
         evaluate_fn = None
     else:
         evaluate_fn = global_evaluate

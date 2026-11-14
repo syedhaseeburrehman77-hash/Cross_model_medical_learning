@@ -70,4 +70,30 @@ class FedLC(FedAvg):
             save_dir / f"fedlc_heads_round_{server_round}.pt",
         )
 
-        return ArrayRecord(aggregated_backbone), {}
+        # Aggregate MetricRecords from clients
+        reply_contents = [msg.content for msg in valid_replies]
+        metrics = {}
+        if self.train_metrics_aggr_fn:
+            metrics = self.train_metrics_aggr_fn(
+                reply_contents,
+                self.weighted_by_key,
+            )
+
+        # Construct global model state (shared backbone + averaged heads for global evaluation)
+        combined_state = OrderedDict(aggregated_backbone)
+        valid_heads = [h for h in self.client_heads.values() if len(h) > 0]
+        if valid_heads:
+            template_head = valid_heads[0]
+            avg_head = OrderedDict()
+            for key, tensor in template_head.items():
+                avg_head[key] = torch.zeros_like(tensor, dtype=torch.float32)
+
+            for w, (cid, head) in zip(weights, self.client_heads.items()):
+                if len(head) > 0:
+                    norm_w = float(w) / total_weight
+                    for key in avg_head:
+                        avg_head[key] += norm_w * head[key].float()
+
+            combined_state.update(avg_head)
+
+        return ArrayRecord(combined_state), metrics
