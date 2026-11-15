@@ -11,11 +11,11 @@ import torch.nn.functional as F
 
 
 def find_last_linear(model: nn.Module) -> Tuple[str, nn.Linear]:
-    """Find the final nn.Linear layer across any model architecture."""
+    """Find the final nn.Linear layer across any model architecture (excluding auxiliary projection heads)."""
     linear_layers = [
         (name, module)
         for name, module in model.named_modules()
-        if isinstance(module, nn.Linear)
+        if isinstance(module, nn.Linear) and not name.startswith("moon_projector")
     ]
     if not linear_layers:
         raise ValueError("Model contains no nn.Linear layers for feature extraction.")

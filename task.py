@@ -11,12 +11,12 @@ def get_transforms(train=True, image_size=224):
         return transforms.Compose([
             transforms.Lambda(lambda img: img.convert("RGB")),
             transforms.Resize(size),
-            # transforms.RandomHorizontalFlip(),
-            # transforms.RandomRotation(15),
-            # transforms.ColorJitter(
-            # brightness=0.2,
-            #   contrast=0.2
-            #),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomRotation(15),
+            transforms.ColorJitter(
+            brightness=0.2,
+               contrast=0.2
+            ),
             transforms.ToTensor(),
             transforms.Normalize(
                 mean=[0.485, 0.456, 0.406],
@@ -101,9 +101,9 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, image_siz
         i for i, m in enumerate(dataset["train"]["modality"]) if m == modality
     ]
     modality_dataset = dataset["train"].select(modality_indices)
-    
-    if num_partitions == 2:
-         # One client per modality: use the whole modality dataset
+
+    if num_partitions== 2:
+        # One client for this modality: use full modality dataset
         partition = modality_dataset
 
     elif num_partitions == 4:

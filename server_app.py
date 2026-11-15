@@ -15,6 +15,7 @@ from utils.fedpara_helper import convert_to_fedpara
 from utils.fedrep_helper import get_fedrep_shared_state_dict
 from utils.moon_helper import prepare_moon_model
 from utils.fedper_helper import get_fedper_shared_state_dict
+from utils.fedlc_helper import get_fedlc_shared_state_dict
 from utils.floco_helper import convert_to_floco
 from utils.scaffold_helper import get_num_supernodes, get_trainable_parameter_names
 from flwr.serverapp.strategy.strategy_utils import aggregate_metricrecords
@@ -31,12 +32,16 @@ floco_endpoints = None
 image_size = 224
 dataset_name = None
 dataset_path = None
+compute_prototypes = False
+use_wandb = False
 @app.main()
 
 def main(grid: Grid, context: Context) -> None:
     """Main entry point for the ServerApp."""
-    global model_name, algorithm, moon_projection_dim, floco_endpoints, image_size, dataset_name, dataset_path
+    global model_name, algorithm, moon_projection_dim, floco_endpoints, image_size, compute_prototypes, use_wandb, dataset_name, dataset_path
     algorithm = context.run_config["algorithm"]
+    compute_prototypes = context.run_config.get("compute-prototypes", False)
+    use_wandb = context.run_config.get("use-wandb", True)
     # Clear the evaluation metrics CSV once at the beginning of this run
     metrics_file = Path(f"results/evaluation_metrics_{algorithm}.csv")
     metrics_file.parent.mkdir(parents=True, exist_ok=True)
@@ -47,7 +52,7 @@ def main(grid: Grid, context: Context) -> None:
     print(f"Started fresh metrics CSV: {metrics_file}")
 
 
-    moon_projection_dim = context.run_config.get("moon-projection-dim", 84)
+    moon_projection_dim = context.run_config.get("moon-projection-dim", 256)
     floco_endpoints = context.run_config.get("endpoints", 3)
     image_size = int(context.run_config.get("image-size", 224))
     dataset_name = context.run_config.get("dataset-name", None)
@@ -61,23 +66,23 @@ def main(grid: Grid, context: Context) -> None:
     # Model selected from config
     model_name = context.run_config["model_name"]
 
-    run = wandb.init(
-        project="federated-learning",
-        name=f"{algorithm}-{model_name}",
-        config={
-            "algorithm": algorithm,
-            "model_name": model_name,
-            "num_rounds": num_rounds,
-            "learning_rate": lr,
-            "fraction_evaluate": fraction_evaluate,
-            "num_clients": get_num_supernodes(),
-            "batch_size": context.run_config["batch-size"],
-            "local_epochs": context.run_config["local-epochs"],
-        },
-    )
-
-    wandb.define_metric("round")
-    wandb.define_metric("*", step_metric="round")
+    if use_wandb:
+        wandb.init(
+            project="federated-learning",
+            name=f"{algorithm}-{model_name}",
+            config={
+                "algorithm": algorithm,
+                "model_name": model_name,
+                "num_rounds": num_rounds,
+                "learning_rate": lr,
+                "fraction_evaluate": fraction_evaluate,
+                "num_clients": get_num_supernodes(),
+                "batch_size": context.run_config["batch-size"],
+                "local_epochs": context.run_config["local-epochs"],
+            },
+        )
+        wandb.define_metric("round")
+        wandb.define_metric("*", step_metric="round")
 
     # Load global model
     global_model = create_model(model_name)
@@ -117,7 +122,8 @@ def main(grid: Grid, context: Context) -> None:
             # Exclude raw partition-id from graphs
             if k != "partition-id" and isinstance(v, (int, float)):
                 log_data[f"train/{k}"] = float(v)
-        wandb.log(log_data)
+        if use_wandb:
+            wandb.log(log_data)
         return metrics
 
     eval_round = 0
@@ -127,16 +133,17 @@ def main(grid: Grid, context: Context) -> None:
         # Flower weighted aggregation of client validation metrics
         metrics = aggregate_metricrecords(records, weighting_key)
 
-        wandb.log({
-            "round": eval_round,
-            "fed_eval/accuracy": float(metrics.get("eval_acc", 0.0)),
-            "fed_eval/loss": float(metrics.get("eval_loss", 0.0)),
-            "fed_eval/precision": float(metrics.get("eval_pre", 0.0)),
-            "fed_eval/recall": float(metrics.get("eval_rec", 0.0)),
-            "fed_eval/f1": float(metrics.get("eval_f1", 0.0)),
-            "fed_eval/sensitivity": float(metrics.get("eval_sen", 0.0)),
-            "fed_eval/specificity": float(metrics.get("eval_spec", 0.0)),
-        })
+        if use_wandb:
+            wandb.log({
+                "round": eval_round,
+                "fed_eval/accuracy": float(metrics.get("eval_acc", 0.0)),
+                "fed_eval/loss": float(metrics.get("eval_loss", 0.0)),
+                "fed_eval/precision": float(metrics.get("eval_pre", 0.0)),
+                "fed_eval/recall": float(metrics.get("eval_rec", 0.0)),
+                "fed_eval/f1": float(metrics.get("eval_f1", 0.0)),
+                "fed_eval/sensitivity": float(metrics.get("eval_sen", 0.0)),
+                "fed_eval/specificity": float(metrics.get("eval_spec", 0.0)),
+            })
         return metrics
 
     # Build kwargs relevant to whichever strategy is picked;
@@ -191,6 +198,11 @@ def main(grid: Grid, context: Context) -> None:
         strategy_kwargs["fedpac_lambda"] = context.run_config.get("fedpac-lambda")
         strategy_kwargs["fedpac_tau"] = context.run_config.get("fedpac-tau")
 
+    elif algorithm == "fedlc":
+        strategy_kwargs["alpha"] = context.run_config.get("fedlc-alpha")
+        strategy_kwargs["pcs"] = context.run_config.get("fedlc-pcs")
+        strategy_kwargs["hc"] = context.run_config.get("fedlc-hc")
+
     strategy = get_strategy(algorithm, **strategy_kwargs)
 
     if algorithm in ("fedbn", "fedrep", "fedper"):
@@ -222,7 +234,7 @@ def main(grid: Grid, context: Context) -> None:
                 print("\nSaving final model to disk...")
                 state_dict = result.arrays.to_torch_state_dict()
 
-                if algorithm in ("fedper", "fedrep", "fedpac"):
+                if algorithm in ("fedper", "fedrep", "fedpac", "fedlc"):
                     torch.save(state_dict, f"{algorithm}_shared_state.pt")
                     print(
                         f"Saved {algorithm} shared parameters only. "
@@ -232,7 +244,8 @@ def main(grid: Grid, context: Context) -> None:
                     torch.save(state_dict, "final_model.pt")
     
     finally:
-        wandb.finish()
+        if use_wandb:
+            wandb.finish()
 
 def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     """Evaluate model on central data."""
@@ -252,9 +265,9 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
         endpoints = floco_endpoints or 3
         model = convert_to_floco(model, endpoints=floco_endpoints, seed=seed)
 
-    # Use strict=True for models that don't have partial loading (e.g. resnet18_mlb, fedmlb).
-    # Use strict=False only for algorithms that send partial state dicts (fedpara, floco, moon).
-    needs_strict_false = algorithm in ("fedpara", "floco", "moon", "fedbn", "fedrep", "fedper", "fedpac")
+    # Use strict=True for algorithms where full state dict is aggregated (e.g. fedavg, fedprox, moon, fedmlb).
+    # Use strict=False only for algorithms that send partial state dicts (fedpara, floco, fedbn, fedrep, fedper, fedpac, fedlc).
+    needs_strict_false = algorithm in ("fedpara", "floco", "fedbn", "fedrep", "fedper", "fedpac", "fedlc")
     model.load_state_dict(arrays.to_torch_state_dict(), strict=not needs_strict_false)
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -279,37 +292,37 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
                         "test_spec": test_specificity,}
 
      # Log global evaluation metrics to W&B
-    wandb.log({
-        "round": server_round,
-        "global/accuracy": float(test_acc),
-        "global/loss": float(test_loss),
-        "global/precision": float(test_precision),
-        "global/recall": float(test_recall),
-        "global/f1": float(test_f1),
-        "global/sensitivity": float(test_sensitivity),
-        "global/specificity": float(test_specificity),
-    })
+    if use_wandb:
+        wandb.log({
+            "round": server_round,
+            "global/accuracy": float(test_acc),
+            "global/loss": float(test_loss),
+            "global/precision": float(test_precision),
+            "global/recall": float(test_recall),
+            "global/f1": float(test_f1),
+            "global/sensitivity": float(test_sensitivity),
+            "global/specificity": float(test_specificity),
+        })
 
     # Save the metrics
     save_metrics(
        test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity, algorithm=algorithm,
     )
 
-    # Class Prototypes Aggregation & Similarity Analysis
-    try:
-        num_nodes = get_num_supernodes()
-        global_protos, sims = aggregate_and_export_round_prototypes(
-            round_num=server_round,
-            num_partitions=num_nodes,
-            output_dir="results",
-        )
-        if global_protos:
-            print(f"\n[Global Prototypes] Round {server_round}: Aggregated across {num_nodes} clients for classes {sorted(list(global_protos.keys()))}")
-            for k, v in sims.items():
-                print(f"  ├── Similarity {k}: {v:.4f}")
-    except Exception as e:
-        print(f"[Prototype Warning] Could not aggregate prototypes for round {server_round}: {e}")
+    # Class Prototypes Aggregation & Similarity Analysis (only for prototype-based algorithms)
+    if algorithm in ("fedproto", "fedpac") or compute_prototypes:
+        try:
+            num_nodes = get_num_supernodes()
+            global_protos, sims = aggregate_and_export_round_prototypes(
+                round_num=server_round,
+                num_partitions=num_nodes,
+                output_dir="results",
+            )
+            if global_protos:
+                print(f"\n[Global Prototypes] Round {server_round}: Aggregated across {num_nodes} clients for classes {sorted(list(global_protos.keys()))}")
+                for k, v in sims.items():
+                    print(f"  ├── Similarity {k}: {v:.4f}")
+        except Exception as e:
+            print(f"[Prototype Warning] Could not aggregate prototypes for round {server_round}: {e}")
 
     return MetricRecord(metrics)
-
-

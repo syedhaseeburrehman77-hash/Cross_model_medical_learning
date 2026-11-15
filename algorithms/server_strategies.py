@@ -5,6 +5,7 @@ from .fedmeta import FedMeta
 from .floco import Floco 
 from .scaffold import Scaffold
 from .fedpac import FedPAC
+from .fedlc import FedLC
 
 STRATEGY_REGISTRY = {
     "fedavg": FedAvg,
@@ -30,6 +31,7 @@ STRATEGY_REGISTRY = {
     # --- Prototype-based FL ---
     "fedproto": FedAvg,
     "fedpac": FedPAC,
+    "fedlc": FedLC,
 }
 
 def get_strategy(algorithm: str, **kwargs):

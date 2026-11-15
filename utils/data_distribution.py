@@ -100,15 +100,12 @@ def export_data_distribution(dataset, num_partitions):
         ]
         modality_dataset = dataset["train"].select(modality_indices)
 
-        if num_partitions == 2:
-            # Each client receives its full modality
+        if num_partitions ==2 :
             partition = modality_dataset
         elif num_partitions == 4:
             # Split each modality between its two clients
             partitioner = get_partitioner(2)
             partitioner.dataset = modality_dataset
-
-            local_partition_id = client_id % 2
             partition = partitioner.load_partition(local_partition_id)
         
         else:

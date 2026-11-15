@@ -40,11 +40,26 @@ def evaluate_model(net, testloader, device):
     recall = recall_score(y_true, y_pred, average="macro", zero_division=0)
     f1 = f1_score(y_true, y_pred, average="macro", zero_division=0)
 
-    cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
-    tn, fp, fn, tp = cm.ravel()
-
-    sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0.0
-    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    unique_classes = np.unique(y_true)
+    if len(unique_classes) <= 2 and set(unique_classes).issubset({0, 1}):
+        # Binary classification (e.g. Brain Tumor Healthy vs Tumor)
+        cm = confusion_matrix(y_true, y_pred, labels=[0, 1])
+        tn, fp, fn, tp = cm.ravel()
+        sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+    else:
+        # Multi-class classification (e.g. CIFAR-10)
+        sensitivity = recall  # Macro-averaged sensitivity equals macro-recall
+        num_classes = max(10, int(np.max(unique_classes)) + 1)
+        cm = confusion_matrix(y_true, y_pred, labels=list(range(num_classes)))
+        specificities = []
+        for i in range(num_classes):
+            denom = np.sum(cm) - np.sum(cm[i, :])
+            if denom > 0:
+                tn_i = np.sum(cm) - (np.sum(cm[i, :]) + np.sum(cm[:, i]) - cm[i, i])
+                fp_i = np.sum(cm[:, i]) - cm[i, i]
+                specificities.append(tn_i / (tn_i + fp_i) if (tn_i + fp_i) > 0 else 0.0)
+        specificity = float(np.mean(specificities)) if specificities else 0.0
 
     return loss, accuracy, precision, recall, f1, sensitivity, specificity
 

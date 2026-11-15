@@ -17,6 +17,7 @@ from .floco_trainer import FlocoTrainer
 from .scaffold_trainer import ScaffoldTrainer
 from .fedproto_trainer import FedProtoTrainer
 from .fedpac_trainer import FedPACTrainer
+from .fedlc_trainer import FedLCTrainer
 
 TRAINER_REGISTRY = {
     "fedavg": FedAvgTrainer,
@@ -40,6 +41,7 @@ TRAINER_REGISTRY = {
     "scaffold": ScaffoldTrainer,
     "fedproto": FedProtoTrainer,
     "fedpac": FedPACTrainer,
+    "fedlc": FedLCTrainer,
 }
 
 
