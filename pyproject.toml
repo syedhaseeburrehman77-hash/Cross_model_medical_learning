@@ -13,21 +13,22 @@ dependencies = [
     "torch==2.10.0",
     "torchvision==0.25.0",
     "scikit-learn",
-    "pytest"
+    "pytest",
+    "wandb"
 ]
 
-[tool.uv.sources]
-torch = [
-    { index = "pytorch-cu128" },
-]
-torchvision = [
-    { index = "pytorch-cu128" },
-]
+#[tool.uv.sources]
+#torch = [
+#    { index = "pytorch-cu128" },
+#]
+#torchvision = [
+#    { index = "pytorch-cu128" },
+#]
 
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
+#[[tool.uv.index]]
+#name = "pytorch-cu128"
+#url = "https://download.pytorch.org/whl/cu128"
+#explicit = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
@@ -71,7 +72,9 @@ endpoints = 10
 rho = 0.3
 pers_lamda = 0
 model_name = "mobilenet"
-image-size = 96
+image-size = 224
+dataset-name = "milk10k"
+dataset-path = "data/milk10k"
 compute-prototypes = true
 proto-lambda = 1.0
 fedpac-lambda = 1.0

@@ -35,9 +35,7 @@ def check_finite_state(state, stage):
 
 # Flower ClientApp
 app = ClientApp()
-
 @app.train()
-
 
 def train(msg: Message, context: Context):
     """Train the model on local data."""
@@ -201,10 +199,10 @@ def train(msg: Message, context: Context):
 
     batch_size = context.run_config["batch-size"]
     image_size = int(context.run_config.get("image-size", 224))
-    trainloader, testloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size)
+    dataset_name = context.run_config.get("dataset-name", None)
+    dataset_path = context.run_config.get("dataset-path", None)
+    trainloader, testloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size, dataset_name=dataset_name, dataset_path=dataset_path,)
 
-    # Pull algorithm-specific kwargs (e.g. proximal_mu) straight from config —
-    # trainers that don't need them just ignore extras via **kwargs
     algorithm = context.run_config["algorithm"]
     cfg = msg.content.get("config", {})
 
@@ -504,7 +502,9 @@ def evaluate(msg: Message, context: Context):
 
     batch_size = context.run_config["batch-size"]
     image_size = int(context.run_config.get("image-size", 224))
-    _, valloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size)
+    dataset_name = context.run_config.get("dataset-name", None)
+    dataset_path = context.run_config.get("dataset-path", None)
+    _, valloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size, dataset_name=dataset_name, dataset_path=dataset_path,)
 
     cfg = msg.content.get("config", {})
 

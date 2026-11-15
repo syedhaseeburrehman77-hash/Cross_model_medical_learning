@@ -29,11 +29,13 @@ algorithm = None
 moon_projection_dim = None
 floco_endpoints = None
 image_size = 224
+dataset_name = None
+dataset_path = None
 @app.main()
 
 def main(grid: Grid, context: Context) -> None:
     """Main entry point for the ServerApp."""
-    global model_name, algorithm, moon_projection_dim, floco_endpoints, image_size
+    global model_name, algorithm, moon_projection_dim, floco_endpoints, image_size, dataset_name, dataset_path
     algorithm = context.run_config["algorithm"]
     # Clear the evaluation metrics CSV once at the beginning of this run
     metrics_file = Path(f"results/evaluation_metrics_{algorithm}.csv")
@@ -48,6 +50,8 @@ def main(grid: Grid, context: Context) -> None:
     moon_projection_dim = context.run_config.get("moon-projection-dim", 84)
     floco_endpoints = context.run_config.get("endpoints", 3)
     image_size = int(context.run_config.get("image-size", 224))
+    dataset_name = context.run_config.get("dataset-name", None)
+    dataset_path = context.run_config.get("dataset-path", None)
 
     # Read run config
     fraction_evaluate: float = context.run_config["fraction-evaluate"]
@@ -196,7 +200,7 @@ def main(grid: Grid, context: Context) -> None:
 
     # Export distribution before training
     num_partitions = get_num_supernodes()
-    dataset = get_dataset()
+    dataset = get_dataset(dataset_name=dataset_name, dataset_path=dataset_path)
 
     export_data_distribution(
         dataset=dataset,
@@ -256,7 +260,11 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     model.to(device)
 
     # Load entire test set
-    test_dataloader = load_centralized_dataset(image_size=image_size)
+    test_dataloader = load_centralized_dataset(
+        image_size=image_size,
+        dataset_name=dataset_name,
+        dataset_path=dataset_path,
+        )
 
     # Evaluate the global model on the test set
     test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity = evaluate_model(model, test_dataloader, device)

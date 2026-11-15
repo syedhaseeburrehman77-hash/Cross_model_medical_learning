@@ -40,21 +40,21 @@ def apply_transforms(batch, train=True, image_size=224):
     batch["img"] = [image_transforms(img) for img in batch["img"]]
     return batch
 
-dataset = None
+dataset_cache = {}
 
-def get_dataset():
-    global dataset
-    DATASET_PATH = "data/brain-tumor-multimodal-image"
-    if dataset is None:
-        # loader = create_dataset('cifar10', None)
-        loader = create_dataset("brain_tumor", DATASET_PATH)
-        dataset = loader.load()
+def get_dataset(dataset_name: str, dataset_path: str):
 
-    return dataset
+    cache_key = (dataset_name, dataset_path)
 
-def load_data(partition_id: int, num_partitions: int, batch_size: int, image_size: int = 224):
+    if cache_key not in dataset_cache:
+        loader = create_dataset(dataset_name, dataset_path)
+        dataset_cache[cache_key] = loader.load()
 
-    dataset = get_dataset()
+    return dataset_cache[cache_key]
+
+def load_data(partition_id: int, num_partitions: int, batch_size: int, image_size: int = 224, dataset_name: str = None, dataset_path: str = None,):
+
+    dataset = get_dataset(dataset_name=dataset_name, dataset_path=dataset_path)
     # partitioner = get_partitioner(num_partitions)
     
     # partitioner.dataset = dataset["train"]
@@ -62,42 +62,65 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, image_siz
 
 
     # Step 1: Assign modalities to clients
+    modalities = sorted(list(set(dataset["train"]["modality"])), reverse=True)
+    if len(modalities) != 2:
+        raise ValueError(f"Expected 2 modalities in dataset, found: {modalities}")
+
+    mod_0, mod_1 = modalities[0], modalities[1]
     if num_partitions == 2:
             modality_mapping = {
-                0: "MRI",
-                1: "CT",
+                0: "mod_0",
+                1: "mod_1",
             }
     elif num_partitions == 4:
             modality_mapping = {
-                0: "MRI",
-                1: "MRI",
-                2: "CT",
-                3: "CT",
+                0: "mod_0",
+                1: "mod_0",
+                2: "mod_1",
+                3: "mod_1",
             }
+    elif num_partitions == 6:
+        modality_mapping = {
+            0: mod_0,
+            1: mod_0,
+            2: mod_0,
+            3: mod_1,
+            4: mod_1,
+            5: mod_1,
+        }
     else:
-        raise ValueError("Expected 2 or 4 clients")
+        raise ValueError("Expected 2 or 4 or 6 clients")
         
     if partition_id not in modality_mapping:
         raise ValueError(f"Invalid partition ID: {partition_id}")
     
     modality = modality_mapping[partition_id]
     
-    # Step 2: Filter dataset by modality
-    modality_dataset = dataset["train"].filter(
-        lambda x: x["modality"] == modality
-    )
+     # Step 2: Filter dataset by modality (index selection avoids decoding all images)
+    modality_indices = [
+        i for i, m in enumerate(dataset["train"]["modality"]) if m == modality
+    ]
+    modality_dataset = dataset["train"].select(modality_indices)
     
     if num_partitions == 2:
          # One client per modality: use the whole modality dataset
         partition = modality_dataset
+
+    elif num_partitions == 4:
+        partitioner = get_partitioner(2)
+        partitioner.dataset = modality_dataset
+        # Step 4: Map global client ID to local partition ID
+        local_partition_id = partition_id % 2
+        # Step 5: Load client partition
+        partition = partitioner.load_partition(local_partition_id)
+
     else:
         # Step 3: Create partitioner with 2 partitions
-        partitioner = get_partitioner(2)
-    
+        partitioner = get_partitioner(3)
         partitioner.dataset = modality_dataset
     
         # Step 4: Map global client ID to local partition ID
-        local_partition_id = partition_id % 2
+        local_partition_id = partition_id % 3
     
         # Step 5: Load client partition
         partition = partitioner.load_partition(local_partition_id)
@@ -150,10 +173,10 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, image_siz
 
     return trainloader, testloader
 
-def load_centralized_dataset(image_size: int = 224):
+def load_centralized_dataset(image_size: int = 224, dataset_name: str = None, dataset_path: str = None,):
     """Load test set and return dataloader."""
     # Load entire test set
-    dataset = get_dataset()
+    dataset = get_dataset(dataset_name=dataset_name, dataset_path=dataset_path)
     test_dataset = dataset["test"]
     # dataset = test_dataset.with_format("torch").with_transform(apply_transforms)
     dataset = test_dataset.with_transform(
