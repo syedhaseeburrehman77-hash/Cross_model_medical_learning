@@ -42,19 +42,19 @@ def apply_transforms(batch, train=True, image_size=224):
 
 dataset_cache = {}
 
-def get_dataset(dataset_name: str, dataset_path: str):
+def get_dataset(dataset_name: str, dataset_path: str, scenario: str = None):
 
-    cache_key = (dataset_name, dataset_path)
+    cache_key = (dataset_name, dataset_path, scenario)
 
     if cache_key not in dataset_cache:
-        loader = create_dataset(dataset_name, dataset_path)
+        loader = create_dataset(dataset_name, dataset_path, scenario)
         dataset_cache[cache_key] = loader.load()
 
     return dataset_cache[cache_key]
 
-def load_data(partition_id: int, num_partitions: int, batch_size: int, image_size: int = 224, dataset_name: str = None, dataset_path: str = None,):
+def load_data(partition_id: int, num_partitions: int, batch_size: int, image_size: int = 224, dataset_name: str = None, dataset_path: str = None, scenario: str = None):
 
-    dataset = get_dataset(dataset_name=dataset_name, dataset_path=dataset_path)
+    dataset = get_dataset(dataset_name=dataset_name, dataset_path=dataset_path, scenario=scenario)
     # partitioner = get_partitioner(num_partitions)
     
     # partitioner.dataset = dataset["train"]
@@ -173,10 +173,10 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, image_siz
 
     return trainloader, testloader
 
-def load_centralized_dataset(image_size: int = 224, dataset_name: str = None, dataset_path: str = None,):
+def load_centralized_dataset(image_size: int = 224, dataset_name: str = None, dataset_path: str = None, scenario: str = None,):
     """Load test set and return dataloader."""
     # Load entire test set
-    dataset = get_dataset(dataset_name=dataset_name, dataset_path=dataset_path)
+    dataset = get_dataset(dataset_name=dataset_name, dataset_path=dataset_path, scenario=scenario)
     test_dataset = dataset["test"]
     # dataset = test_dataset.with_format("torch").with_transform(apply_transforms)
     dataset = test_dataset.with_transform(

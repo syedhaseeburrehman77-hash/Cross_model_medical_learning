@@ -43,11 +43,13 @@ def train(msg: Message, context: Context):
 
     algorithm = context.run_config["algorithm"]
     model_name = context.run_config["model_name"]
+    scenario = context.run_config.get("scenario", "binary")
+    num_classes = int(context.run_config.get("num-classes", 2))
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     global_model = None
     
     # Create model
-    model = create_model(model_name) 
+    model = create_model(model_name, num_classes=num_classes) 
     
     if algorithm == "fedpara":
         convert_to_fedpara(model)
@@ -118,7 +120,7 @@ def train(msg: Message, context: Context):
 
     # FedMLB: create a teacher from the received global parameters.
     elif algorithm == "fedmlb":
-        global_model = create_model(model_name)
+        global_model = create_model(model_name, num_classes=num_classes)
         global_model.load_state_dict(received_state)
         global_model.to(device)
         global_model.eval()
@@ -208,7 +210,7 @@ def train(msg: Message, context: Context):
     image_size = int(context.run_config.get("image-size", 224))
     dataset_name = context.run_config.get("dataset-name", None)
     dataset_path = context.run_config.get("dataset-path", None)
-    trainloader, testloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size, dataset_name=dataset_name, dataset_path=dataset_path,)
+    trainloader, testloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size, dataset_name=dataset_name, dataset_path=dataset_path, scenario=scenario,)
 
     algorithm = context.run_config["algorithm"]
     cfg = msg.content.get("config", {})
@@ -444,9 +446,11 @@ def evaluate(msg: Message, context: Context):
     
     algorithm = context.run_config["algorithm"]
     model_name = context.run_config["model_name"]
+    scenario = context.run_config.get("scenario", "binary")
+    num_classes = int(context.run_config.get("num-classes", 2))
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    model = create_model(model_name)
+    model = create_model(model_name, num_classes=num_classes)
     if algorithm == "fedpara":
         convert_to_fedpara(model)
 
@@ -527,7 +531,7 @@ def evaluate(msg: Message, context: Context):
     image_size = int(context.run_config.get("image-size", 224))
     dataset_name = context.run_config.get("dataset-name", None)
     dataset_path = context.run_config.get("dataset-path", None)
-    _, valloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size, dataset_name=dataset_name, dataset_path=dataset_path,)
+    _, valloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size, dataset_name=dataset_name, dataset_path=dataset_path, scenario=scenario)
 
     cfg = msg.content.get("config", {})
 

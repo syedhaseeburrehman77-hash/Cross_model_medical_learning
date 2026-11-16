@@ -6,8 +6,15 @@ from .base import BaseDatasetLoader
 
 class Milk10kLoader(BaseDatasetLoader):
  
-    def __init__(self, root_dir: str, one_modality_per_lesion: bool = True, seed: int = 42):
+    def __init__(
+        self,
+        root_dir: str,
+        scenario: str = "binary",
+        one_modality_per_lesion: bool = True,
+        seed: int = 42,
+    ):
         super().__init__(root_dir)
+        self.scenario = scenario.lower()
         self.one_modality_per_lesion = one_modality_per_lesion
         self.seed = seed
 
@@ -28,15 +35,37 @@ class Milk10kLoader(BaseDatasetLoader):
             "clinical: close-up": "Clinical",
         }
 
-        labels = {
-            "Benign": 0,
-            "Malignant": 1,
-        }
+        # 1. Define scenario target column and label mapping
+        if self.scenario == "binary":
+            target_col = "diagnosis_1"
+            labels = {"Benign": 0, "Malignant": 1}
+            valid_df = df[
+                df["diagnosis_1"].isin(labels.keys()) & df["image_type"].isin(modalities.keys())
+            ].copy()
+        elif self.scenario in ("diagnosis_1", "diagnosis_1_multiclass"):
+            target_col = "diagnosis_1"
+            labels = {"Benign": 0, "Malignant": 1, "Indeterminate": 2}
+            valid_df = df[
+                df["diagnosis_1"].isin(labels.keys()) & df["image_type"].isin(modalities.keys())
+            ].copy()
+        elif self.scenario == "diagnosis_2":
+            target_col = "diagnosis_2"
+            valid_df = df[
+                df["diagnosis_2"].notna() & df["image_type"].isin(modalities.keys())
+            ].copy()
+            unique_classes = sorted(valid_df["diagnosis_2"].unique())
+            labels = {cls_name: idx for idx, cls_name in enumerate(unique_classes)}
+        elif self.scenario == "diagnosis_3":
+            target_col = "diagnosis_3"
+            valid_df = df[
+                df["diagnosis_3"].notna() & df["image_type"].isin(modalities.keys())
+            ].copy()
+            unique_classes = sorted(valid_df["diagnosis_3"].unique())
+            labels = {cls_name: idx for idx, cls_name in enumerate(unique_classes)}
+        else:
+            raise ValueError(f"Unknown scenario: {self.scenario}. Choose from 'binary', 'diagnosis_1', 'diagnosis_2', 'diagnosis_3'.")
 
-        valid_df = df[
-            df["diagnosis_1"].isin(labels.keys()) & df["image_type"].isin(modalities.keys())
-        ].copy()
-
+        # 2. Modality separation per lesion (stratify by diagnosis_1 to maintain balanced modality representation)
         if self.one_modality_per_lesion:
             lesions_df = valid_df[["lesion_id", "diagnosis_1"]].drop_duplicates(subset=["lesion_id"])
             lesions_dermo, lesions_clin = train_test_split(
@@ -55,13 +84,14 @@ class Milk10kLoader(BaseDatasetLoader):
         else:
             filtered_df = valid_df
 
+        # 3. Build HuggingFace Dataset
         records = []
         for _, row in filtered_df.iterrows():
-            diag = str(row["diagnosis_1"]).strip()
+            diag = str(row[target_col]).strip()
             img_type = str(row["image_type"]).strip()
             img_path = images_dir / f"{row['isic_id']}.jpg"
 
-            if img_path.exists():
+            if img_path.exists() and diag in labels:
                 records.append(
                     {
                         "img": str(img_path),

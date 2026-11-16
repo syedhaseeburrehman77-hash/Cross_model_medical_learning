@@ -43,15 +43,15 @@ serverapp = "server_app:app"
 clientapp = "client_app:app"
 
 [tool.flwr.app.config]
-num-server-rounds = 5
+num-server-rounds = 1
 fraction-evaluate = 1.0
 local-epochs = 1
 learning-rate = 0.001
 batch-size = 16
 save-model = false
 fraction-fit = 1.0
-min-available-clients = 4
-algorithm = "moon"
+min-available-clients = 2
+algorithm = "fedavg"
 proximal-mu = 0.01
 server-learning-rate = 0.1
 server-momentum = 0.5
@@ -77,6 +77,8 @@ model_name = "mobilenet"
 image-size = 224
 dataset-name = "milk10k"
 dataset-path = "data/milk10k"
+scenario = "diagnosis_3"    # Options: "binary", "diagnosis_1", "diagnosis_2", "diagnosis_3"
+num-classes = 27             # 2 for binary, 3 for diagnosis_1, 19 for diagnosis_2, 27 for diagnosis_3
 compute-prototypes = false
 use-wandb = false
 proto-lambda = 1.0

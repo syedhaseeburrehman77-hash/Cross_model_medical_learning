@@ -1,7 +1,7 @@
 from .registry import MODEL_REGISTRY
 
 
-def create_model(model_name: str):
+def create_model(model_name: str, num_classes: int = 2):
     try:
         model_class = MODEL_REGISTRY[model_name]
     except KeyError:
@@ -11,4 +11,4 @@ def create_model(model_name: str):
             f"Available models: {available}"
         )
 
-    return model_class().build()
+    return model_class().build(num_classes=num_classes)

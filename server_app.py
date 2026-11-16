@@ -30,6 +30,8 @@ algorithm = None
 moon_projection_dim = None
 floco_endpoints = None
 image_size = 224
+scenario = "binary"
+num_classes = 2
 dataset_name = None
 dataset_path = None
 compute_prototypes = False
@@ -38,8 +40,10 @@ use_wandb = False
 
 def main(grid: Grid, context: Context) -> None:
     """Main entry point for the ServerApp."""
-    global model_name, algorithm, moon_projection_dim, floco_endpoints, image_size, compute_prototypes, use_wandb, dataset_name, dataset_path
+    global model_name, algorithm, moon_projection_dim, floco_endpoints, image_size, compute_prototypes, use_wandb, dataset_name, dataset_path, scenario, num_classes
     algorithm = context.run_config["algorithm"]
+    scenario = context.run_config.get("scenario", "binary")
+    num_classes = int(context.run_config.get("num-classes", 2))
     compute_prototypes = context.run_config.get("compute-prototypes", False)
     use_wandb = context.run_config.get("use-wandb", True)
     # Clear the evaluation metrics CSV once at the beginning of this run
@@ -85,7 +89,7 @@ def main(grid: Grid, context: Context) -> None:
         wandb.define_metric("*", step_metric="round")
 
     # Load global model
-    global_model = create_model(model_name)
+    global_model = create_model(model_name, num_classes=num_classes)
 
     if algorithm == "fedpara":
         convert_to_fedpara(global_model) 
@@ -212,7 +216,7 @@ def main(grid: Grid, context: Context) -> None:
 
     # Export distribution before training
     num_partitions = get_num_supernodes()
-    dataset = get_dataset(dataset_name=dataset_name, dataset_path=dataset_path)
+    dataset = get_dataset(dataset_name=dataset_name, dataset_path=dataset_path, scenario=scenario)
 
     export_data_distribution(
         dataset=dataset,
@@ -252,7 +256,7 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
 
     # Load the model and initialize it with the received weights
    
-    model = create_model(model_name)  
+    model = create_model(model_name, num_classes=num_classes)  
 
     if algorithm == "fedpara":
         convert_to_fedpara(model)
@@ -277,6 +281,7 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
         image_size=image_size,
         dataset_name=dataset_name,
         dataset_path=dataset_path,
+        scenario=scenario,
         )
 
     # Evaluate the global model on the test set

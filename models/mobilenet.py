@@ -4,7 +4,7 @@ from torchvision import models
 from .base import BaseModel
 class MobileNetModel(BaseModel):
 
-    def build(self) -> nn.Module:
+    def build(self, num_classes: int = 2) -> nn.Module:
         model = models.mobilenet_v2(
             weights=models.MobileNet_V2_Weights.IMAGENET1K_V1
         )
@@ -19,7 +19,7 @@ class MobileNetModel(BaseModel):
             nn.Linear(1280, 256),
             nn.ReLU(inplace=True),
             nn.Dropout(p=0.3),
-            nn.Linear(256, 2),
+            nn.Linear(256, num_classes),
         )
 
         return model
