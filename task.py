@@ -69,15 +69,15 @@ def load_data(partition_id: int, num_partitions: int, batch_size: int, image_siz
     mod_0, mod_1 = modalities[0], modalities[1]
     if num_partitions == 2:
             modality_mapping = {
-                0: "mod_0",
-                1: "mod_1",
+                0: mod_0,
+                1: mod_1,
             }
     elif num_partitions == 4:
             modality_mapping = {
-                0: "mod_0",
-                1: "mod_0",
-                2: "mod_1",
-                3: "mod_1",
+                0: mod_0,
+                1: mod_0,
+                2: mod_1,
+                3: mod_1,
             }
     elif num_partitions == 6:
         modality_mapping = {
