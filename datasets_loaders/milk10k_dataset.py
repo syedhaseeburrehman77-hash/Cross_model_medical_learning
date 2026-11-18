@@ -62,8 +62,42 @@ class Milk10kLoader(BaseDatasetLoader):
             ].copy()
             unique_classes = sorted(valid_df["diagnosis_3"].unique())
             labels = {cls_name: idx for idx, cls_name in enumerate(unique_classes)}
+        elif self.scenario in ("ground_truth_diagnosis", "ground_truth", "diagnosis_gt"):
+            gt_csv_path = dataset_root / "supplements" / "training_gt.csv"
+            if not gt_csv_path.exists():
+                candidate_paths = [
+                    dataset_root / "training_gt.csv",
+                    Path(r"D:\milk10k\supplements\training_gt.csv"),
+                ]
+                for cand in candidate_paths:
+                    if cand.exists():
+                        gt_csv_path = cand
+                        break
+
+            if not gt_csv_path.exists():
+                raise FileNotFoundError(f"training_gt.csv not found at {gt_csv_path}")
+
+            gt_df = pd.read_csv(gt_csv_path)
+
+            if len(gt_df.columns) == 2 and "lesion_id" in gt_df.columns:
+                target_col = [c for c in gt_df.columns if c != "lesion_id"][0]
+                unique_classes = sorted(gt_df[target_col].dropna().unique())
+            else:
+                class_cols = [c for c in gt_df.columns if c != "lesion_id"]
+                unique_classes = sorted(class_cols)
+                target_col = "ground_truth_diagnosis"
+                gt_df[target_col] = gt_df[class_cols].idxmax(axis=1)
+
+            labels = {cls_name: idx for idx, cls_name in enumerate(unique_classes)}
+
+            merged_df = df.merge(gt_df[["lesion_id", target_col]], on="lesion_id", how="inner")
+            valid_df = merged_df[
+                merged_df[target_col].notna() & merged_df["image_type"].isin(modalities.keys())
+            ].copy()
         else:
-            raise ValueError(f"Unknown scenario: {self.scenario}. Choose from 'binary', 'diagnosis_1', 'diagnosis_2', 'diagnosis_3'.")
+            raise ValueError(
+                f"Unknown scenario: {self.scenario}. Choose from 'binary', 'diagnosis_1', 'diagnosis_2', 'diagnosis_3', 'ground_truth_diagnosis'."
+            )
 
         # 2. Modality separation per lesion (stratify by diagnosis_1 to maintain balanced modality representation)
         if self.one_modality_per_lesion:
