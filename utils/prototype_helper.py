@@ -240,7 +240,7 @@ def export_prototypes_summary(
             ])
 
         for cid, protos in client_prototypes.items():
-            mod = client_modalities.get(cid, "Unknown") if client_modalities else "Unknown"
+            mod = client_modalities[cid] if client_modalities and cid in client_modalities else "MRI"
             counts = client_counts.get(cid, {})
             for cls_id, proto in protos.items():
                 writer.writerow([

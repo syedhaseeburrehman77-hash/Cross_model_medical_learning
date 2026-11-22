@@ -18,6 +18,7 @@ from .scaffold_trainer import ScaffoldTrainer
 from .fedproto_trainer import FedProtoTrainer
 from .fedpac_trainer import FedPACTrainer
 from .fedlc_trainer import FedLCTrainer
+from .cross_modal_proto_trainer import CrossModalProtoTrainer
 
 TRAINER_REGISTRY = {
     "fedavg": FedAvgTrainer,
@@ -42,6 +43,7 @@ TRAINER_REGISTRY = {
     "fedproto": FedProtoTrainer,
     "fedpac": FedPACTrainer,
     "fedlc": FedLCTrainer,
+    "fedcmproto": CrossModalProtoTrainer,
 }
 
 

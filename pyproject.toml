@@ -17,18 +17,18 @@ dependencies = [
     "wandb"
 ]
 
-#[tool.uv.sources]
-#torch = [
-#    { index = "pytorch-cu128" },
-#]
-#torchvision = [
-#    { index = "pytorch-cu128" },
-#]
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cu128" },
+]
+torchvision = [
+    { index = "pytorch-cu128" },
+]
 
-#[[tool.uv.index]]
-#name = "pytorch-cu128"
-#url = "https://download.pytorch.org/whl/cu128"
-#explicit = true
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
@@ -43,15 +43,15 @@ serverapp = "server_app:app"
 clientapp = "client_app:app"
 
 [tool.flwr.app.config]
-num-server-rounds = 2
+num-server-rounds = 1
 fraction-evaluate = 1.0
 local-epochs = 1
 learning-rate = 0.001
 batch-size = 16
 save-model = false
 fraction-fit = 1.0
-min-available-clients = 4
-algorithm = "fedavg"
+min-available-clients = 2
+algorithm = "fedcmproto"
 proximal-mu = 0.01
 server-learning-rate = 0.1
 server-momentum = 0.5
@@ -75,10 +75,10 @@ rho = 0.3
 pers_lamda = 0
 model_name = "mobilenet"
 image-size = 224
-dataset-name = "milk10k"
-dataset-path = "data/milk10k"
-scenario = "ground_truth_diagnosis"    # Options: "binary", "diagnosis_1", "diagnosis_2", "diagnosis_3", "ground_truth_diagnosis"
-num-classes = 11             # 2 for binary, 3 for diagnosis_1, 19 for diagnosis_2, 27 for diagnosis_3 , 11 for ground_truth_diagnosis,
+dataset-name = "brain_tumor"
+dataset-path = "data/brain-tumor-multimodal-image"
+scenario = "binary"    # Options: "binary", "diagnosis_1", "diagnosis_2", "diagnosis_3", "ground_truth_diagnosis"
+num-classes = 2            # 2 for binary, 3 for diagnosis_1, 19 for diagnosis_2, 27 for diagnosis_3 , 11 for ground_truth_diagnosis,
 compute-prototypes = false
 use-wandb = false
 proto-lambda = 1.0
@@ -88,6 +88,9 @@ fedlc-head-epochs = 1
 fedlc-alpha = 0.01
 fedlc-pcs = true
 fedlc-hc = true
+warmup-fraction = 0.10
+align-lambda = 0.5
+transfer-tau = 15.0
 
 [partition]
 type = "dirichlet"   # options: iid, dirichlet, shard

@@ -22,6 +22,7 @@ from utils.floco_helper import convert_to_floco
 from utils.prototype_helper import compute_class_prototypes
 from utils.fedpac_helper import load_classifier_head
 from utils.fedlc_helper import get_fedlc_head_state_dict, get_fedlc_shared_state_dict, load_fedlc_head_state_dict
+from utils.cross_modal_helper import load_cross_modal_guidance
 
 def check_finite_state(state, stage):
     for name, tensor in state.items():
@@ -203,6 +204,8 @@ def train(msg: Message, context: Context):
         modality = "MRI" if partition_id == 0 else "CT"
     elif num_partitions == 4:
         modality = "MRI" if partition_id in (0, 1) else "CT"
+    elif num_partitions == 6:
+        modality = "MRI" if partition_id in (0, 1, 2) else "CT"
     else:
         modality = f"Client_{partition_id}"
 
@@ -220,6 +223,24 @@ def train(msg: Message, context: Context):
             algorithm,
             server_cv=scaffold_server_cv,
             client_cv=scaffold_client_cv,
+        )
+    elif algorithm == "fedcmproto":
+        current_server_round = cfg.get("server-round")
+        guidance = load_cross_modal_guidance(partition_id, expected_round=current_server_round)
+        opp_protos = guidance.get("opposite_master_prototypes", {}) if guidance else {}
+        weights = guidance.get("transfer_weights", {}) if guidance else {}
+        # Server is authoritative: uses is-warmup distributed in client_config
+        is_warmup = bool(cfg.get("is-warmup", True))
+        align_lambda = float(cfg.get("align-lambda", context.run_config.get("align-lambda", 0.5)))
+
+        trainer = get_trainer(
+            algorithm,
+            opposite_master_prototypes=opp_protos,
+            transfer_weights=weights,
+            align_lambda=align_lambda,
+            is_warmup=is_warmup,
+            client_id=partition_id,
+            modality=modality,
         )
     else:
         # Load global prototypes for FedPAC feature alignment
@@ -331,6 +352,20 @@ def train(msg: Message, context: Context):
             device,
         )
 
+    elif algorithm == "fedcmproto":
+        train_loss = trainer.train(
+            model,
+            trainloader,
+            context.run_config["local-epochs"],
+            msg.content["config"]["lr"],
+            device,
+        )
+
+        check_finite_state(
+            model.state_dict(),
+            f"client {partition_id} after cross-modal proto training"
+        )
+
     else:
         train_loss = trainer.train(
             model,
@@ -377,7 +412,7 @@ def train(msg: Message, context: Context):
             f"with {len(head_state)} tensors")
 
     # Class Prototypes only needed for prototype-based algorithms unless explicitly enabled
-    compute_prototypes = context.run_config.get("compute-prototypes", False) or algorithm in ("fedproto", "fedpac")
+    compute_prototypes = context.run_config.get("compute-prototypes", False) or algorithm in ("fedproto", "fedpac", "fedcmproto")
     if compute_prototypes:
         try:
             client_protos, class_counts = compute_class_prototypes(model, trainloader, device)
@@ -392,6 +427,9 @@ def train(msg: Message, context: Context):
                 "modality": modality,
             }
             torch.save(proto_data, proto_dir / f"client_{partition_id}_latest_prototype.pt")
+            cm_dir = Path("results/cross_modal_proto")
+            cm_dir.mkdir(parents=True, exist_ok=True)
+            torch.save(proto_data, cm_dir / f"client_{partition_id}_latest_prototype.pt")
             
             # Log clear summary for the client
             print(f"[Prototype] Client {partition_id} ({modality}): computed prototypes for classes {sorted(list(client_protos.keys()))}")
@@ -524,6 +562,8 @@ def evaluate(msg: Message, context: Context):
         modality = "MRI" if partition_id == 0 else "CT"
     elif num_partitions == 4:
         modality = "MRI" if partition_id in (0, 1) else "CT"
+    elif num_partitions == 6:
+        modality = "MRI" if partition_id in (0, 1, 2) else "CT"
     else:
         modality = f"Client_{partition_id}"
 
