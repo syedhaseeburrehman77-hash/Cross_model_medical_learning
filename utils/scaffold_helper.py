@@ -1,28 +1,21 @@
 import tomllib
 from pathlib import Path
 
-def get_num_supernodes():
-    # Resolve config.toml relative to the repository root.
-    config_path = Path.home() / ".flwr" / "config.toml"
-
-    if not config_path.is_file():
-        raise FileNotFoundError(
-            f"Flower config.toml not found at: {config_path}"
-        )
-
-    with config_path.open("rb") as file:
-        config = tomllib.load(file)
-
-    active_profile = config["superlink"]["default"]
-    profile = config["superlink"][active_profile]
-
+def get_num_supernodes(default: int = 4) -> int:
+    """Safely return the number of supernodes from ~/.flwr/config.toml if present, else default."""
     try:
-        return int(profile["options"]["num-supernodes"])
-    except KeyError as exc:
-        raise ValueError(
-            f"The active profile '{active_profile}' does not define "
-            "'options.num-supernodes' in {config_path}."
-        ) from exc
+        config_path = Path.home() / ".flwr" / "config.toml"
+        if config_path.is_file():
+            with config_path.open("rb") as file:
+                config = tomllib.load(file)
+            active_profile = config.get("superlink", {}).get("default", "default")
+            profile = config.get("superlink", {}).get(active_profile, {})
+            opts = profile.get("options", {})
+            if "num-supernodes" in opts:
+                return int(opts["num-supernodes"])
+    except Exception:
+        pass
+    return default
 
 
 def get_trainable_parameter_names(model):
