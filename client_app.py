@@ -225,13 +225,21 @@ def train(msg: Message, context: Context):
             client_cv=scaffold_client_cv,
         )
     elif algorithm == "fedcmproto":
-        current_server_round = cfg.get("server-round")
-        guidance = load_cross_modal_guidance(partition_id, expected_round=current_server_round)
-        opp_protos = guidance.get("opposite_master_prototypes", {}) if guidance else {}
-        weights = guidance.get("transfer_weights", {}) if guidance else {}
-        # Server is authoritative: uses is-warmup distributed in client_config
-        is_warmup = bool(cfg.get("is-warmup", True))
-        align_lambda = float(cfg.get("align-lambda", context.run_config.get("align-lambda", 0.5)))
+        if "server-round" not in cfg or "is-warmup" not in cfg or "align-lambda" not in cfg:
+            raise KeyError(
+                f"[CrossModalProto Error] Missing required server config keys in round config: {list(cfg.keys())}"
+            )
+        current_server_round = int(cfg["server-round"])
+        is_warmup = bool(cfg["is-warmup"])
+        align_lambda = float(cfg["align-lambda"])
+
+        if is_warmup:
+            opp_protos = {}
+            weights = {}
+        else:
+            guidance = load_cross_modal_guidance(partition_id, expected_round=current_server_round)
+            opp_protos = guidance["opposite_master_prototypes"]
+            weights = guidance["transfer_weights"]
 
         trainer = get_trainer(
             algorithm,
@@ -360,6 +368,7 @@ def train(msg: Message, context: Context):
             msg.content["config"]["lr"],
             device,
         )
+        trainer.remove_hooks()
 
         check_finite_state(
             model.state_dict(),
@@ -411,9 +420,31 @@ def train(msg: Message, context: Context):
         print(f"[FedLC] Client {partition_id}: saved personalized head/calibration "
             f"with {len(head_state)} tensors")
 
+    if algorithm == "fedcmproto":
+        client_protos, class_counts = compute_class_prototypes(model, trainloader, device)
+        if not client_protos:
+            raise RuntimeError(
+                f"[CrossModalProto Error] Client {partition_id} ({modality}) extracted 0 class prototypes."
+            )
+        cm_dir = Path("results/cross_modal_proto")
+        cm_dir.mkdir(parents=True, exist_ok=True)
+        proto_data = {
+            "round": int(cfg["server-round"]),
+            "prototypes": client_protos,
+            "counts": class_counts,
+            "partition_id": partition_id,
+            "modality": modality,
+        }
+        torch.save(proto_data, cm_dir / f"client_{partition_id}_latest_prototype.pt")
+
+        print(f"[Prototype] Client {partition_id} ({modality}): computed prototypes for classes {sorted(list(client_protos.keys()))}")
+        for c in sorted(list(client_protos.keys())):
+            p = client_protos[c]
+            c_name = "Tumor" if c == 1 else ("Healthy" if c == 0 else f"Class_{c}")
+            print(f"  └── Class {c} ({c_name}): count={class_counts[c]}, dim={p.shape[0]}, norm={p.norm().item():.4f}")
+
     # Class Prototypes only needed for prototype-based algorithms unless explicitly enabled
-    compute_prototypes = context.run_config.get("compute-prototypes", False) or algorithm in ("fedproto", "fedpac", "fedcmproto")
-    if compute_prototypes:
+    elif context.run_config.get("compute-prototypes", False) or algorithm in ("fedproto", "fedpac"):
         try:
             client_protos, class_counts = compute_class_prototypes(model, trainloader, device)
             proto_dir = Path("results/prototypes")
@@ -427,9 +458,6 @@ def train(msg: Message, context: Context):
                 "modality": modality,
             }
             torch.save(proto_data, proto_dir / f"client_{partition_id}_latest_prototype.pt")
-            cm_dir = Path("results/cross_modal_proto")
-            cm_dir.mkdir(parents=True, exist_ok=True)
-            torch.save(proto_data, cm_dir / f"client_{partition_id}_latest_prototype.pt")
             
             # Log clear summary for the client
             print(f"[Prototype] Client {partition_id} ({modality}): computed prototypes for classes {sorted(list(client_protos.keys()))}")

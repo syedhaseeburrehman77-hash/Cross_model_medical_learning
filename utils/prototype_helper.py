@@ -89,24 +89,26 @@ def compute_class_prototypes(
                 batch_features = extractor.features
 
                 if batch_features is None:
-                    continue
+                    raise RuntimeError("FeatureExtractor failed to capture features during prototype computation.")
 
-                for i in range(len(labels)):
-                    label = int(labels[i].item())
-                    feat = batch_features[i].detach().cpu()
+                for label_val in labels.unique().tolist():
+                    label = int(label_val)
+                    mask = (labels == label)
+                    count = int(mask.sum().item())
+                    feat_sum = batch_features[mask].detach().sum(dim=0)
 
                     if label not in feature_sums:
-                        feature_sums[label] = feat.clone()
-                        class_counts[label] = 1
+                        feature_sums[label] = feat_sum
+                        class_counts[label] = count
                     else:
-                        feature_sums[label] += feat
-                        class_counts[label] += 1
+                        feature_sums[label] += feat_sum
+                        class_counts[label] += count
 
     prototypes: Dict[int, torch.Tensor] = {}
     for label, total_feat in feature_sums.items():
         count = class_counts[label]
         if count > 0:
-            prototypes[label] = total_feat / count
+            prototypes[label] = (total_feat / float(count)).cpu()
 
     return prototypes, class_counts
 

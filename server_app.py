@@ -208,10 +208,11 @@ def main(grid: Grid, context: Context) -> None:
         strategy_kwargs["hc"] = context.run_config.get("fedlc-hc")
 
     elif algorithm == "fedcmproto":
-        strategy_kwargs["warmup_fraction"] = context.run_config.get("warmup-fraction")
+        strategy_kwargs["warmup_fraction"] = context.run_config["warmup-fraction"]
         strategy_kwargs["warmup_rounds"] = context.run_config.get("warmup-rounds")
-        strategy_kwargs["align_lambda"] = context.run_config.get("align-lambda")
-        strategy_kwargs["transfer_tau"] = context.run_config.get("transfer-tau")
+        strategy_kwargs["align_lambda"] = context.run_config["align-lambda"]
+        strategy_kwargs["transfer_tau"] = context.run_config["transfer-tau"]
+        strategy_kwargs["proto_ema_beta"] = context.run_config["proto-ema-beta"]
         strategy_kwargs["num_rounds"] = num_rounds
 
     strategy = get_strategy(algorithm, **strategy_kwargs)

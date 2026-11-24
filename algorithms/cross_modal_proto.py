@@ -3,7 +3,7 @@
 from collections import OrderedDict
 import copy
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import torch
@@ -13,14 +13,16 @@ from flwr.serverapp.strategy.strategy_utils import sample_nodes
 
 from utils.cross_modal_helper import (
     compute_modality_master_prototypes,
+    update_ema_prototypes,
     compute_directional_transfer_weights,
+    get_opposite_modality,
     save_cross_modal_guidance,
     export_cross_modal_summary,
 )
 
 
 class CrossModalProto(FedAvg):
-    """Cross-Modal Prototype Server Strategy."""
+    """Cross-Modal Prototype Server Strategy (without FedBN)."""
 
     def __init__(
         self,
@@ -28,20 +30,34 @@ class CrossModalProto(FedAvg):
         warmup_rounds: Optional[int] = None,
         align_lambda: float = 0.5,
         transfer_tau: float = 15.0,
+        proto_ema_beta: float = 0.7,
         num_rounds: int = 10,
         *args,
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        self.warmup_fraction = float(warmup_fraction if warmup_fraction is not None else 0.10)
-        self.align_lambda = float(align_lambda if align_lambda is not None else 0.5)
-        self.transfer_tau = float(transfer_tau if transfer_tau is not None else 15.0)
-        self.num_rounds = int(num_rounds if num_rounds is not None else 10)
+        self.warmup_fraction = float(warmup_fraction)
+        self.align_lambda = float(align_lambda)
+        self.transfer_tau = float(transfer_tau)
+        self.proto_ema_beta = float(proto_ema_beta)
+        self.num_rounds = int(num_rounds)
 
         if warmup_rounds is not None:
             self.warmup_rounds = int(warmup_rounds)
         else:
             self.warmup_rounds = max(1, int(self.num_rounds * self.warmup_fraction))
+
+        if not (0.0 <= self.proto_ema_beta < 1.0):
+            raise ValueError(f"[CrossModalProto Error] proto_ema_beta must be in [0.0, 1.0), got {self.proto_ema_beta}.")
+
+        # Clear stale cross-modal artifacts from previous runs
+        cm_dir = Path("results/cross_modal_proto")
+        if cm_dir.exists():
+            for stale_file in cm_dir.glob("*.pt"):
+                stale_file.unlink()
+            summary_csv = cm_dir / "cross_modal_transfer_summary.csv"
+            if summary_csv.exists():
+                summary_csv.unlink()
 
         # Internal state
         self.master_prototypes: Dict[str, Dict[int, torch.Tensor]] = {}
@@ -55,7 +71,7 @@ class CrossModalProto(FedAvg):
             f"[CrossModalProto Strategy Initialized] "
             f"Total Rounds={self.num_rounds}, Warm-Up Rounds={self.warmup_rounds} "
             f"({self.warmup_fraction * 100:.0f}%), Align Lambda={self.align_lambda}, "
-            f"Transfer Tau={self.transfer_tau}"
+            f"Transfer Tau={self.transfer_tau}, EMA Beta={self.proto_ema_beta}"
         )
 
     def configure_train(
@@ -68,7 +84,6 @@ class CrossModalProto(FedAvg):
         node_ids, _ = sample_nodes(grid, self.min_available_nodes, sample_size)
 
         is_warmup = server_round <= self.warmup_rounds
-
         phase_name = "WARM-UP PHASE" if is_warmup else "CROSS-MODAL PROTOTYPE ALIGNMENT"
         print(f"\n{'='*75}")
         print(f" [CrossModalProto Server Round {server_round}/{self.num_rounds}] Stage: {phase_name}")
@@ -93,35 +108,50 @@ class CrossModalProto(FedAvg):
 
     def aggregate_train(self, server_round: int, replies):
         """Aggregate global model parameters via FedAvg and process client prototypes."""
-        valid_replies, _ = self._check_and_log_replies(replies, is_train=True, validate=False)
+        valid_replies, error_replies = self._check_and_log_replies(replies, is_train=True, validate=True)
+        if error_replies:
+            raise RuntimeError(
+                f"[CrossModalProto Error] Round {server_round} encountered {len(error_replies)} client failure(s)."
+            )
         if not valid_replies:
-            return None, None
+            raise RuntimeError(f"[CrossModalProto Error] Round {server_round} received 0 valid training replies.")
 
-        weights = [float(msg.content["metrics"].get(self.weighted_by_key, 1.0)) for msg in valid_replies]
-        total_weight = sum(weights) or 1.0
-
+        weights: List[float] = []
         client_states: List[OrderedDict] = []
-        client_ids: List[int] = []
+        proto_dir = Path("results/cross_modal_proto")
 
-        proto_dirs = [Path("results/cross_modal_proto"), Path("results/prototypes")]
         for msg in valid_replies:
-            cid = int(msg.content["metrics"].get("partition-id", len(client_ids)))
-            client_ids.append(cid)
-            state = msg.content["arrays"].to_torch_state_dict()
-            client_states.append(state)
+            metrics = msg.content["metrics"]
+            if "partition-id" not in metrics:
+                raise KeyError("[CrossModalProto Error] Missing 'partition-id' in client metrics.")
+            if self.weighted_by_key not in metrics:
+                raise KeyError(f"[CrossModalProto Error] Missing '{self.weighted_by_key}' in client metrics.")
 
-            # Read client's latest prototypes and sample counts
-            for pdir in proto_dirs:
-                proto_file = pdir / f"client_{cid}_latest_prototype.pt"
-                if proto_file.exists():
-                    try:
-                        pdata = torch.load(proto_file, weights_only=False)
-                        self.client_prototypes[cid] = pdata["prototypes"]
-                        self.client_counts[cid] = pdata["counts"]
-                        self.client_modalities[cid] = pdata["modality"]
-                        break
-                    except Exception:
-                        pass
+            cid = int(metrics["partition-id"])
+            weights.append(float(metrics[self.weighted_by_key]))
+            client_states.append(msg.content["arrays"].to_torch_state_dict())
+
+            proto_file = proto_dir / f"client_{cid}_latest_prototype.pt"
+            if not proto_file.exists():
+                raise FileNotFoundError(
+                    f"[CrossModalProto Error] Missing prototype file for client {cid} in round {server_round}: {proto_file}"
+                )
+
+            pdata = torch.load(proto_file, map_location="cpu", weights_only=False)
+            saved_round = pdata.get("round")
+            if saved_round != server_round:
+                raise RuntimeError(
+                    f"[CrossModalProto Error] Stale prototype file for client {cid}: "
+                    f"found round {saved_round}, expected round {server_round}."
+                )
+
+            self.client_prototypes[cid] = pdata["prototypes"]
+            self.client_counts[cid] = pdata["counts"]
+            self.client_modalities[cid] = pdata["modality"]
+
+        total_weight = sum(weights)
+        if total_weight <= 0.0:
+            raise ValueError(f"[CrossModalProto Error] Total aggregation weight must be > 0, got {total_weight}.")
 
         # 1. Aggregate shared model weights via FedAvg
         template_state = client_states[0]
@@ -130,71 +160,77 @@ class CrossModalProto(FedAvg):
             aggregated_state[key] = torch.zeros_like(tensor, dtype=torch.float32)
 
         for w, state in zip(weights, client_states):
-            norm_w = float(w) / total_weight
+            norm_w = w / total_weight
             for key in aggregated_state:
                 aggregated_state[key] += norm_w * state[key].float()
 
-        # 2. Modality Prototype Grouping & Smart Tutor Weight Calculation
-        if self.client_prototypes:
-            self.master_prototypes, self.modality_counts = compute_modality_master_prototypes(
-                client_prototypes=self.client_prototypes,
-                client_counts=self.client_counts,
-                client_modalities=self.client_modalities,
-            )
+        for key, template_tensor in template_state.items():
+            if not template_tensor.is_floating_point():
+                aggregated_state[key] = aggregated_state[key].round().to(template_tensor.dtype)
 
-            self.transfer_weights = compute_directional_transfer_weights(
-                client_counts=self.client_counts,
-                client_modalities=self.client_modalities,
-                modality_counts=self.modality_counts,
-                tau=self.transfer_tau,
-            )
+        # 2. Modality Prototype Grouping, L2 Normalization, EMA Smoothing & Directional Transfer Weights
+        round_master_prototypes, self.modality_counts = compute_modality_master_prototypes(
+            client_prototypes=self.client_prototypes,
+            client_counts=self.client_counts,
+            client_modalities=self.client_modalities,
+        )
 
-            # Save round summary & guidance for next round
-            is_next_warmup = (server_round + 1) <= self.warmup_rounds
-            save_cross_modal_guidance(
-                server_round=server_round + 1,
-                master_prototypes=self.master_prototypes,
-                transfer_weights=self.transfer_weights,
-                client_modalities=self.client_modalities,
-                is_warmup=is_next_warmup,
-            )
+        self.master_prototypes = update_ema_prototypes(
+            prev_ema_prototypes=self.master_prototypes,
+            current_master_prototypes=round_master_prototypes,
+            ema_beta=self.proto_ema_beta,
+        )
 
-            export_cross_modal_summary(
-                server_round=server_round,
-                master_prototypes=self.master_prototypes,
-                modality_counts=self.modality_counts,
-                transfer_weights=self.transfer_weights,
-                client_modalities=self.client_modalities,
-            )
+        self.transfer_weights = compute_directional_transfer_weights(
+            client_counts=self.client_counts,
+            client_modalities=self.client_modalities,
+            modality_counts=self.modality_counts,
+            tau=self.transfer_tau,
+        )
 
-            # Print detailed server-side progress
-            self._log_server_status(server_round)
+        # Save EMA-smoothed guidance for next round
+        is_next_warmup = (server_round + 1) <= self.warmup_rounds
+        save_cross_modal_guidance(
+            server_round=server_round + 1,
+            master_prototypes=self.master_prototypes,
+            transfer_weights=self.transfer_weights,
+            client_modalities=self.client_modalities,
+            is_warmup=is_next_warmup,
+        )
 
-        avg_loss = float(np.mean([msg.content["metrics"].get("train_loss", 0.0) for msg in valid_replies]))
-        metrics = {"train_loss": avg_loss}
-        return ArrayRecord(aggregated_state), metrics
+        export_cross_modal_summary(
+            server_round=server_round,
+            modality_counts=self.modality_counts,
+            transfer_weights=self.transfer_weights,
+            client_modalities=self.client_modalities,
+        )
 
-    def _log_server_status(self, server_round: int):
-        """Print visible information to inspect Master Prototypes and Directional Transfer Weights."""
-        print("\n--- [Step 5: Master Modality Prototypes] ---")
+        self._log_server_status()
+
+        avg_loss = float(np.mean([float(msg.content["metrics"]["train_loss"]) for msg in valid_replies]))
+        return ArrayRecord(aggregated_state), {"train_loss": avg_loss}
+
+    def _log_server_status(self):
+        """Print visible information to inspect EMA Master Prototypes and Directional Transfer Weights."""
+        print("\n--- [EMA-Smoothed Normalized Master Modality Prototypes] ---")
         for mod, protos in self.master_prototypes.items():
             classes_info = []
-            for c, p in protos.items():
-                cnt = self.modality_counts.get(mod, {}).get(c, 0)
+            for c, p in sorted(protos.items()):
+                cnt = self.modality_counts[mod][c]
                 classes_info.append(f"Class {c} (N={cnt}, norm={p.norm().item():.3f})")
             print(f"  * Master {mod} Prototype: {', '.join(classes_info)}")
 
-        print("\n--- [Step 6 & 7: Smart Tutor Directional Transfer Weights] ---")
+        print("\n--- [Smart Tutor Directional Transfer Weights] ---")
         all_mods = set(self.master_prototypes.keys())
         for cid in sorted(self.transfer_weights.keys()):
             mod = self.client_modalities[cid]
-            opp_candidates = [m for m in all_mods if m != mod]
-            opp_mod = opp_candidates[0] if opp_candidates else ("CT" if mod == "MRI" else "MRI")
+            opp_mod = get_opposite_modality(mod, all_mods)
+            if opp_mod is None:
+                raise ValueError(f"[CrossModalProto Error] Missing opposite modality for client {cid} ({mod}).")
             weights = self.transfer_weights[cid]
-            weights_str = []
-            for c, w in sorted(weights.items()):
-                c_name = f"Class {c}"
-                local_n = self.client_counts.get(cid, {}).get(c, 0)
-                weights_str.append(f"{c_name} [Local N={local_n}]: W={w:.4f}")
+            weights_str = [
+                f"Class {c} [Local N={self.client_counts[cid].get(c, 0)}]: W={w:.4f}"
+                for c, w in sorted(weights.items())
+            ]
             print(f"  * Hospital {cid} ({mod} -> learns from {opp_mod}): {', '.join(weights_str)}")
         print(f"{'-'*75}\n")
