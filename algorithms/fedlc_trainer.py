@@ -49,7 +49,7 @@ class FedLCTrainer(BaseTrainer):
         lr: float,
         device: torch.device,
         valloader=None,
-        patience: int = 5,
+        patience: int = 3,
     ) -> float:
         model.to(device)
 

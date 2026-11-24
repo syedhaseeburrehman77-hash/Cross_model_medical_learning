@@ -17,7 +17,7 @@ class BaseTrainer(ABC):
         Override if the algorithm needs to snapshot state (e.g. global params)."""
         pass
 
-    def train(self, model, trainloader, epochs, lr, device, valloader=None, patience=5):
+    def train(self, model, trainloader, epochs, lr, device, valloader=None, patience=3):
         """Shared training loop — same for every algorithm.
         Only compute_loss / on_train_start differ per strategy."""
         self.on_train_start(model)

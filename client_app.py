@@ -374,7 +374,7 @@ def train(msg: Message, context: Context):
             msg.content["config"]["lr"],
             device,
             valloader=testloader,
-            patience=5,
+            patience=3,
         )
 
         check_finite_state(

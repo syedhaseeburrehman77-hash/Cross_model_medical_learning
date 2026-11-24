@@ -15,7 +15,7 @@ class FedRepTrainer(BaseTrainer):
     def compute_loss(self, model, outputs, labels, criterion):
         return criterion(outputs, labels)
 
-    def train(self, model, trainloader, local_epochs, lr, device, valloader=None, patience=5):
+    def train(self, model, trainloader, local_epochs, lr, device, valloader=None, patience=3):
         model.to(device)
 
         modules = dict(model.named_modules())

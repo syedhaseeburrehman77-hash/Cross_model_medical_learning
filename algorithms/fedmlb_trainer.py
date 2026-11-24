@@ -28,7 +28,7 @@ class FedMlbTrainer(BaseTrainer):
     def compute_loss(self, model, outputs, labels, criterion):
         raise RuntimeError("FedMLB requires its custom train() method.")
 
-    def train(self, model, trainloader, epochs, lr, device, global_model=None, valloader=None, patience=5):
+    def train(self, model, trainloader, epochs, lr, device, global_model=None, valloader=None, patience=3):
         teacher = global_model or self.global_model
 
         if teacher is None:
