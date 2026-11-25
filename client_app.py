@@ -361,12 +361,32 @@ def train(msg: Message, context: Context):
         )
 
     elif algorithm == "fedcmproto":
+        # Compute class weights to handle class imbalance (inverse frequency weighting)
+        all_labels = []
+        for _batch in trainloader:
+            all_labels.append(_batch["label"])
+        all_labels = torch.cat(all_labels)
+        num_classes_local = int(context.run_config.get("num-classes", 2))
+        class_counts_cw = torch.zeros(num_classes_local, dtype=torch.float32)
+        for c in range(num_classes_local):
+            class_counts_cw[c] = float((all_labels == c).sum().item())
+        # Avoid division by zero for classes not present locally
+        class_counts_cw = class_counts_cw.clamp(min=1.0)
+        class_weights_cw = class_counts_cw.sum() / (num_classes_local * class_counts_cw)
+        print(
+            f"[CrossModalProto] Client {partition_id} ({modality}) class weights: "
+            + ", ".join(f"C{c}={class_weights_cw[c].item():.3f}" for c in range(num_classes_local))
+        )
+
         train_loss = trainer.train(
             model,
             trainloader,
             context.run_config["local-epochs"],
             msg.content["config"]["lr"],
             device,
+            valloader=testloader,
+            patience=3,
+            class_weights=class_weights_cw,
         )
         trainer.remove_hooks()
 
@@ -636,41 +656,6 @@ def evaluate(msg: Message, context: Context):
             valloader,
             device,
         )
-
-                # Check global model parameters and buffers
-        for name, tensor in model.state_dict().items():
-            if torch.is_floating_point(tensor) or torch.is_complex(tensor):
-                if not torch.isfinite(tensor).all():
-                    raise RuntimeError(
-                        f"Global model contains NaN/Inf before evaluation: {name}"
-                    )
-
-        # Inspect the first evaluation batch
-        batch = next(iter(valloader))
-        images = batch["img"].to(device)
-
-        if not torch.isfinite(images).all():
-            raise RuntimeError("Global evaluation images contain NaN/Inf")
-
-        print("Global model state is finite")
-        print("Input images are finite")
-        print("Input shape:", tuple(images.shape))
-        print("Input range:", images.min().item(), images.max().item())
-
-        model.eval()
-        with torch.no_grad():
-            outputs = model(images)
-
-        print("Output shape:", tuple(outputs.shape))
-        print("Output finite:", torch.isfinite(outputs).all().item())
-
-        if torch.isfinite(outputs).any():
-            finite_outputs = outputs[torch.isfinite(outputs)]
-            print(
-                "Finite output range:",
-                finite_outputs.min().item(),
-                finite_outputs.max().item()
-            )
         
     # Construct and return reply Message
     metrics = {

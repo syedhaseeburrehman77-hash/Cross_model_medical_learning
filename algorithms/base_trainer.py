@@ -17,15 +17,24 @@ class BaseTrainer(ABC):
         Override if the algorithm needs to snapshot state (e.g. global params)."""
         pass
 
-    def train(self, model, trainloader, epochs, lr, device, valloader=None, patience=3):
+    def train(self, model, trainloader, epochs, lr, device, valloader=None, patience=3,
+              class_weights: torch.Tensor = None):
         """Shared training loop — same for every algorithm.
         Only compute_loss / on_train_start differ per strategy."""
         self.on_train_start(model)
 
         model.to(device)
-       
-        criterion = torch.nn.CrossEntropyLoss()
-        # optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+
+        if class_weights is not None:
+            criterion = torch.nn.CrossEntropyLoss(weight=class_weights.to(device))
+        else:
+            criterion = torch.nn.CrossEntropyLoss()
+
+        # Separate plain criterion for early-stopping val (avoids side-effects from
+        # algorithm-specific compute_loss hooks, e.g. feature extractors in fedcmproto)
+        val_criterion = torch.nn.CrossEntropyLoss(weight=class_weights.to(device)) \
+            if class_weights is not None else torch.nn.CrossEntropyLoss()
+
         optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
 
         best_val_loss = float("inf")
@@ -33,12 +42,12 @@ class BaseTrainer(ABC):
         patience_counter = 0
         total_loss = 0.0
         num_batches = 0
-        
+
         for epoch in range(epochs):
             model.train()
             epoch_loss = 0.0
             epoch_batches = 0
-            
+
             for batch in trainloader:
                 images, labels = batch["img"].to(device), batch["label"].to(device)
 
@@ -53,11 +62,10 @@ class BaseTrainer(ABC):
 
                 total_loss += loss.item()
                 num_batches += 1
+                epoch_loss += loss.item()
+                epoch_batches += 1
 
-                epoch_loss += loss.item()      # Accumulates loss for this epoch only
-                epoch_batches += 1             # Counts batches in this epoch
-                
-            # Early stopping based on validation loss
+            # Early stopping: use plain CE (val_criterion) to avoid hook side-effects
             if valloader is not None:
                 model.eval()
                 val_loss = 0.0
@@ -67,13 +75,8 @@ class BaseTrainer(ABC):
                     for batch in valloader:
                         images = batch["img"].to(device)
                         labels = batch["label"].to(device)
-
                         outputs = model(images)
-                        loss = self.compute_loss(
-                            model, outputs, labels, criterion
-                        )
-
-                        val_loss += loss.item()
+                        val_loss += val_criterion(outputs, labels).item()
                         val_batches += 1
 
                 if val_batches > 0:
@@ -86,9 +89,7 @@ class BaseTrainer(ABC):
 
                     if val_loss < best_val_loss:
                         best_val_loss = val_loss
-                        best_model_state = copy.deepcopy(
-                            model.state_dict()
-                        )
+                        best_model_state = copy.deepcopy(model.state_dict())
                         patience_counter = 0
                     else:
                         patience_counter += 1

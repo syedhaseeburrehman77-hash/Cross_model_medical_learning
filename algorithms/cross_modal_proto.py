@@ -26,8 +26,8 @@ class CrossModalProto(FedAvg):
 
     def __init__(
         self,
-        warmup_fraction: float = 0.10,
-        warmup_rounds: Optional[int] = None,
+        warmup_rounds: int = 2,
+        warmup_fraction: Optional[float] = None,
         align_lambda: float = 0.5,
         transfer_tau: float = 15.0,
         proto_ema_beta: float = 0.7,
@@ -36,16 +36,17 @@ class CrossModalProto(FedAvg):
         **kwargs,
     ):
         super().__init__(*args, **kwargs)
-        self.warmup_fraction = float(warmup_fraction)
+        self.num_rounds = int(num_rounds)
         self.align_lambda = float(align_lambda)
         self.transfer_tau = float(transfer_tau)
         self.proto_ema_beta = float(proto_ema_beta)
-        self.num_rounds = int(num_rounds)
 
         if warmup_rounds is not None:
             self.warmup_rounds = int(warmup_rounds)
+        elif warmup_fraction is not None:
+            self.warmup_rounds = max(1, int(self.num_rounds * float(warmup_fraction)))
         else:
-            self.warmup_rounds = max(1, int(self.num_rounds * self.warmup_fraction))
+            self.warmup_rounds = 2
 
         if not (0.0 <= self.proto_ema_beta < 1.0):
             raise ValueError(f"[CrossModalProto Error] proto_ema_beta must be in [0.0, 1.0), got {self.proto_ema_beta}.")
@@ -69,8 +70,8 @@ class CrossModalProto(FedAvg):
 
         print(
             f"[CrossModalProto Strategy Initialized] "
-            f"Total Rounds={self.num_rounds}, Warm-Up Rounds={self.warmup_rounds} "
-            f"({self.warmup_fraction * 100:.0f}%), Align Lambda={self.align_lambda}, "
+            f"Total Rounds={self.num_rounds}, Warm-Up Rounds={self.warmup_rounds}, "
+            f"Align Lambda={self.align_lambda}, "
             f"Transfer Tau={self.transfer_tau}, EMA Beta={self.proto_ema_beta}"
         )
 

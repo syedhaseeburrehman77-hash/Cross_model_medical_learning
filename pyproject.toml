@@ -88,10 +88,10 @@ fedlc-head-epochs = 1
 fedlc-alpha = 0.01
 fedlc-pcs = true
 fedlc-hc = true
-warmup-fraction = 0.10
+warmup-rounds = 2
 align-lambda = 0.5
 transfer-tau = 15.0
-proto-ema-beta = 0.7
+proto-ema-beta = 0.5
 
 [partition]
 type = "dirichlet"   # options: iid, dirichlet, shard
