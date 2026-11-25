@@ -76,8 +76,8 @@ class FedCMMoon(FedAvg):
         # Initialize group models in Round 1 if not yet created
         global_state = arrays.to_torch_state_dict()
         if not self.group_models:
-            # Pre-initialize default modality group models to W_g
-            for default_mod in ("MRI", "CT", "Dermoscopy", "Clinical"):
+            # Pre-initialize both groups to W_g (Group_0 = MRI/Dermoscopy, Group_1 = CT/Clinical)
+            for default_mod in ("Group_0", "Group_1"):
                 self.group_models[default_mod] = copy.deepcopy(global_state)
 
         # Persist group models for client loading
@@ -126,7 +126,10 @@ class FedCMMoon(FedAvg):
             metrics = msg.content["metrics"]
             cid = int(metrics["partition-id"])
             weight = float(metrics[self.weighted_by_key])
-            modality = str(metrics.get("modality", "Unknown"))
+            # Derive modality from partition-id (group 0: MRI/Dermoscopy, group 1: CT/Clinical)
+            # modality-group is encoded as float(0) or float(1) to satisfy MetricRecord type constraints
+            group_id = int(metrics.get("modality-group", 0 if cid in (0, 1, 2) else 1))
+            modality = f"Group_{group_id}"
             self.client_modalities[cid] = modality
 
             state_dict = msg.content["arrays"].to_torch_state_dict()

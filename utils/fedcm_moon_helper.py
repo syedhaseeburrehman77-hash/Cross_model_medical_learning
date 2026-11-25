@@ -63,8 +63,20 @@ def load_group_model(
     modality: str,
     input_dir: str = "results/fedcm_moon",
 ) -> Optional[Dict[str, torch.Tensor]]:
-    """Load the group model for a client's modality."""
-    group_file = Path(input_dir) / f"group_model_{modality}.pt"
+    """Load the group model for a client's modality.
+    
+    Group models are saved as Group_0 (MRI/Dermoscopy) or Group_1 (CT/Clinical)
+    to avoid passing strings through Flower's MetricRecord (which only accepts int/float).
+    """
+    # Map semantic modality name → group file key
+    _MODALITY_TO_GROUP = {
+        "MRI": "Group_0",
+        "Dermoscopy": "Group_0",
+        "CT": "Group_1",
+        "Clinical": "Group_1",
+    }
+    group_key = _MODALITY_TO_GROUP.get(modality, "Group_0")
+    group_file = Path(input_dir) / f"group_model_{group_key}.pt"
     if not group_file.exists():
         return None
     return torch.load(group_file, map_location="cpu", weights_only=False)

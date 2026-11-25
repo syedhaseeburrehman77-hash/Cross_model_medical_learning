@@ -539,7 +539,9 @@ def train(msg: Message, context: Context):
         "train_loss": train_loss,
         "num-examples": len(trainloader.dataset),
         "partition-id": partition_id,
-        "modality": modality,
+        # Encode modality as integer: 0 = first group (MRI/Dermoscopy), 1 = second group (CT/Clinical)
+        # MetricRecord only accepts int/float — strings are not allowed by Flower
+        "modality-group": float(0 if partition_id in (0, 1, 2) else 1),
     }
     
     if hasattr(trainer, "get_metrics"):
