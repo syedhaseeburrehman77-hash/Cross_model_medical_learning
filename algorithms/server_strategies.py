@@ -7,6 +7,7 @@ from .scaffold import Scaffold
 from .fedpac import FedPAC
 from .fedlc import FedLC
 from .cross_modal_proto import CrossModalProto
+from .fedcm_moon import FedCMMoon
 
 STRATEGY_REGISTRY = {
     "fedavg": FedAvg,
@@ -34,6 +35,7 @@ STRATEGY_REGISTRY = {
     "fedpac": FedPAC,
     "fedlc": FedLC,
     "fedcmproto": CrossModalProto,
+    "fedcm_moon": FedCMMoon,
 }
 
 def get_strategy(algorithm: str, **kwargs):

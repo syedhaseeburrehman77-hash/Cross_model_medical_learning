@@ -19,6 +19,7 @@ from .fedproto_trainer import FedProtoTrainer
 from .fedpac_trainer import FedPACTrainer
 from .fedlc_trainer import FedLCTrainer
 from .cross_modal_proto_trainer import CrossModalProtoTrainer
+from .fedcm_moon_trainer import FedCMMoonTrainer
 
 TRAINER_REGISTRY = {
     "fedavg": FedAvgTrainer,
@@ -44,6 +45,7 @@ TRAINER_REGISTRY = {
     "fedpac": FedPACTrainer,
     "fedlc": FedLCTrainer,
     "fedcmproto": CrossModalProtoTrainer,
+    "fedcm_moon": FedCMMoonTrainer,
 }
 
 

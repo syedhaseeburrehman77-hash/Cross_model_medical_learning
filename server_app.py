@@ -94,7 +94,7 @@ def main(grid: Grid, context: Context) -> None:
     if algorithm == "fedpara":
         convert_to_fedpara(global_model) 
 
-    elif algorithm == "moon":
+    elif algorithm in ("moon", "fedcm_moon"):
         prepare_moon_model(global_model, projection_dim=moon_projection_dim)
 
     elif algorithm == "floco":
@@ -214,6 +214,14 @@ def main(grid: Grid, context: Context) -> None:
         strategy_kwargs["proto_ema_beta"] = context.run_config["proto-ema-beta"]
         strategy_kwargs["num_rounds"] = num_rounds
 
+    elif algorithm == "fedcm_moon":
+        strategy_kwargs["mu"] = float(context.run_config.get("moon-mu"))
+        strategy_kwargs["lambda_param"] = float(context.run_config.get("moon-lambda"))
+        strategy_kwargs["temperature"] = float(context.run_config.get("moon-temperature"))
+        strategy_kwargs["warmup_rounds"] = int(context.run_config.get("moon-warmup-rounds"))
+        strategy_kwargs["ramp_rounds"] = int(context.run_config.get("moon-ramp-rounds"))
+        strategy_kwargs["num_rounds"] = num_rounds
+
     strategy = get_strategy(algorithm, **strategy_kwargs)
 
     if algorithm in ("fedbn", "fedrep", "fedper"):
@@ -268,7 +276,7 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
     if algorithm == "fedpara":
         convert_to_fedpara(model)
 
-    elif algorithm == "moon":
+    elif algorithm in ("moon", "fedcm_moon"):
         prepare_moon_model(model, projection_dim=moon_projection_dim)
 
     elif algorithm == "floco":

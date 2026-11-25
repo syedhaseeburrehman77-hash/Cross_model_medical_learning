@@ -23,6 +23,7 @@ from utils.prototype_helper import compute_class_prototypes
 from utils.fedpac_helper import load_classifier_head
 from utils.fedlc_helper import get_fedlc_head_state_dict, get_fedlc_shared_state_dict, load_fedlc_head_state_dict
 from utils.cross_modal_helper import load_cross_modal_guidance
+from utils.fedcm_moon_helper import load_group_model
 
 def check_finite_state(state, stage):
     for name, tensor in state.items():
@@ -55,7 +56,7 @@ def train(msg: Message, context: Context):
     if algorithm == "fedpara":
         convert_to_fedpara(model)
 
-    elif algorithm == "moon":
+    elif algorithm in ("moon", "fedcm_moon"):
         prepare_moon_model(
             model,
             projection_dim=context.run_config.get("moon-projection-dim", 256),
@@ -200,19 +201,25 @@ def train(msg: Message, context: Context):
     # Load the data
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
-    if num_partitions == 2:
-        modality = "MRI" if partition_id == 0 else "CT"
-    elif num_partitions == 4:
-        modality = "MRI" if partition_id in (0, 1) else "CT"
-    elif num_partitions == 6:
-        modality = "MRI" if partition_id in (0, 1, 2) else "CT"
-    else:
-        modality = f"Client_{partition_id}"
-
     batch_size = context.run_config["batch-size"]
     image_size = int(context.run_config.get("image-size", 224))
     dataset_name = context.run_config.get("dataset-name", None)
     dataset_path = context.run_config.get("dataset-path", None)
+
+    is_skin = (
+        dataset_name == "milk10k"
+        or "skin" in str(dataset_path or "").lower()
+        or "milk" in str(dataset_path or "").lower()
+    )
+    if num_partitions == 2:
+        modality = ("Dermoscopy" if partition_id == 0 else "Clinical") if is_skin else ("MRI" if partition_id == 0 else "CT")
+    elif num_partitions == 4:
+        modality = ("Dermoscopy" if partition_id in (0, 1) else "Clinical") if is_skin else ("MRI" if partition_id in (0, 1) else "CT")
+    elif num_partitions == 6:
+        modality = ("Dermoscopy" if partition_id in (0, 1, 2) else "Clinical") if is_skin else ("MRI" if partition_id in (0, 1, 2) else "CT")
+    else:
+        modality = f"Client_{partition_id}"
+
     trainloader, testloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size, dataset_name=dataset_name, dataset_path=dataset_path, scenario=scenario,)
 
     algorithm = context.run_config["algorithm"]
@@ -249,6 +256,16 @@ def train(msg: Message, context: Context):
             is_warmup=is_warmup,
             client_id=partition_id,
             modality=modality,
+        )
+    elif algorithm == "fedcm_moon":
+        group_model_state = load_group_model(modality)
+        trainer = get_trainer(
+            algorithm,
+            group_model_state=group_model_state,
+            mu=float(cfg.get("moon-mu", context.run_config.get("moon-mu", 1.0))),
+            lambda_t=float(cfg.get("moon-lambda-t", 0.0)),
+            temperature=float(cfg.get("moon-temperature", context.run_config.get("moon-temperature", 0.5))),
+            weight_decay=float(context.run_config.get("moon-weight-decay", 1e-5)),
         )
     else:
         # Load global prototypes for FedPAC feature alignment
@@ -289,7 +306,7 @@ def train(msg: Message, context: Context):
     )
 
     # Call the training function
-    if algorithm == "moon":
+    if algorithm in ("moon", "fedcm_moon"):
         previous_state_dict = None
         if "moon_previous_state" in context.state:
             previous_state_dict = context.state["moon_previous_state"].to_torch_state_dict()
@@ -305,6 +322,12 @@ def train(msg: Message, context: Context):
         # Save trained local state for next round's contrastive loss
         context.state["moon_previous_state"] = ArrayRecord(
                 {k: v.detach().cpu() for k, v in model.state_dict().items()})
+
+        if algorithm == "fedcm_moon":
+            check_finite_state(
+                model.state_dict(),
+                f"client {partition_id} after {algorithm} training"
+            )
 
     elif algorithm == "floco":
         # Extract subregion parameters if provided by server (from round tau onwards)
@@ -516,6 +539,7 @@ def train(msg: Message, context: Context):
         "train_loss": train_loss,
         "num-examples": len(trainloader.dataset),
         "partition-id": partition_id,
+        "modality": modality,
     }
     
     if hasattr(trainer, "get_metrics"):
@@ -540,7 +564,7 @@ def evaluate(msg: Message, context: Context):
     if algorithm == "fedpara":
         convert_to_fedpara(model)
 
-    elif algorithm == "moon":
+    elif algorithm in ("moon", "fedcm_moon"):
         prepare_moon_model(
             model,
             projection_dim=context.run_config.get("moon-projection-dim", 256),
@@ -606,19 +630,25 @@ def evaluate(msg: Message, context: Context):
     # Load the data
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
-    if num_partitions == 2:
-        modality = "MRI" if partition_id == 0 else "CT"
-    elif num_partitions == 4:
-        modality = "MRI" if partition_id in (0, 1) else "CT"
-    elif num_partitions == 6:
-        modality = "MRI" if partition_id in (0, 1, 2) else "CT"
-    else:
-        modality = f"Client_{partition_id}"
-
     batch_size = context.run_config["batch-size"]
     image_size = int(context.run_config.get("image-size", 224))
     dataset_name = context.run_config.get("dataset-name", None)
     dataset_path = context.run_config.get("dataset-path", None)
+
+    is_skin = (
+        dataset_name == "milk10k"
+        or "skin" in str(dataset_path or "").lower()
+        or "milk" in str(dataset_path or "").lower()
+    )
+    if num_partitions == 2:
+        modality = ("Dermoscopy" if partition_id == 0 else "Clinical") if is_skin else ("MRI" if partition_id == 0 else "CT")
+    elif num_partitions == 4:
+        modality = ("Dermoscopy" if partition_id in (0, 1) else "Clinical") if is_skin else ("MRI" if partition_id in (0, 1) else "CT")
+    elif num_partitions == 6:
+        modality = ("Dermoscopy" if partition_id in (0, 1, 2) else "Clinical") if is_skin else ("MRI" if partition_id in (0, 1, 2) else "CT")
+    else:
+        modality = f"Client_{partition_id}"
+
     _, valloader = load_data(partition_id, num_partitions, batch_size, image_size=image_size, dataset_name=dataset_name, dataset_path=dataset_path, scenario=scenario)
 
     cfg = msg.content.get("config", {})
