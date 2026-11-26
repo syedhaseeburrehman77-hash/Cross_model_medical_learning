@@ -13,6 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from utils.moon_helper import MoonFeatureForward
+from utils.prototype_helper import FeatureExtractor
 from .base_trainer import BaseTrainer
 
 
@@ -111,10 +112,11 @@ class FedCMMoonTrainer(BaseTrainer):
         )
         criterion = torch.nn.CrossEntropyLoss().to(device)
 
-        # 6. Feature extractor forward hooks (local, global, previous)
+        # 6. Feature extractor forward hooks (local, global, previous, and classification prototype extractor)
         local_forward = MoonFeatureForward(model)
         global_forward = MoonFeatureForward(global_model)
         previous_forward = MoonFeatureForward(previous_model) if has_previous else None
+        proto_extractor = FeatureExtractor(model)
 
         total_loss = 0.0
         total_ce_loss = 0.0
@@ -135,8 +137,11 @@ class FedCMMoonTrainer(BaseTrainer):
 
                     optimizer.zero_grad()
 
-                    # Trainable model forward pass: captures features f(x), projection z, and logits
-                    local_feats, local_proj, logits = local_forward.forward(images)
+                    # Trainable model forward pass:
+                    # - local_forward captures 1280-dim backbone features and calculates 256-dim MOON projection z
+                    # - proto_extractor captures 256-dim pre-classifier feature representations
+                    _, local_proj, logits = local_forward.forward(images)
+                    proto_features = proto_extractor.features
 
                     # 1. Classification Cross-Entropy Loss
                     loss_ce = criterion(logits, labels)
@@ -157,7 +162,7 @@ class FedCMMoonTrainer(BaseTrainer):
                         loss_con_glob = torch.tensor(0.0, device=device)
 
                     # 3. Idea C: Class-Wise Modality Prototype Alignment Loss
-                    if self.lambda_t > 0.0 and self._device_target_prototypes:
+                    if self.lambda_t > 0.0 and self._device_target_prototypes and proto_features is not None:
                         loss_align_num = torch.tensor(0.0, device=device)
                         weight_sum = 0.0
                         for c_val in labels.unique().tolist():
@@ -166,7 +171,10 @@ class FedCMMoonTrainer(BaseTrainer):
                                 continue
 
                             mask = (labels == c)
-                            p_kc = local_feats[mask].mean(dim=0)
+                            if not mask.any():
+                                continue
+
+                            p_kc = proto_features[mask].mean(dim=0)
                             P_opp = self._device_target_prototypes[c]
 
                             g_kc = float(self.transfer_weights.get(c, 1.0)) if self.transfer_weights else 1.0
@@ -205,6 +213,7 @@ class FedCMMoonTrainer(BaseTrainer):
             global_forward.close()
             if previous_forward is not None:
                 previous_forward.close()
+            proto_extractor.remove()
 
         return total_loss / max(num_batches, 1)
 
