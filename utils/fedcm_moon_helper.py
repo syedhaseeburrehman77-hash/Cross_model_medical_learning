@@ -27,9 +27,9 @@ def get_client_modality(
 
 def compute_lambda_t(
     server_round: int,
-    warmup_rounds: int = 10,
-    ramp_rounds: int = 10,
-    lambda_max: float = 1.0,
+    warmup_rounds: int = 1,
+    ramp_rounds: int = 1,
+    lambda_max: float = 0.5,
 ) -> float:
     """Compute the group contrastive weight lambda_t for communication round t.
 

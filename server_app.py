@@ -215,11 +215,13 @@ def main(grid: Grid, context: Context) -> None:
         strategy_kwargs["num_rounds"] = num_rounds
 
     elif algorithm == "fedcm_moon":
-        strategy_kwargs["mu"] = float(context.run_config.get("moon-mu"))
-        strategy_kwargs["lambda_param"] = float(context.run_config.get("moon-lambda"))
-        strategy_kwargs["temperature"] = float(context.run_config.get("moon-temperature"))
-        strategy_kwargs["warmup_rounds"] = int(context.run_config.get("moon-warmup-rounds"))
-        strategy_kwargs["ramp_rounds"] = int(context.run_config.get("moon-ramp-rounds"))
+        strategy_kwargs["mu"] = float(context.run_config["moon-mu"])
+        strategy_kwargs["lambda_param"] = float(context.run_config["moon-lambda"])
+        strategy_kwargs["temperature"] = float(context.run_config["moon-temperature"])
+        strategy_kwargs["warmup_rounds"] = int(context.run_config["moon-warmup-rounds"])
+        strategy_kwargs["ramp_rounds"] = int(context.run_config["moon-ramp-rounds"])
+        strategy_kwargs["proto_ema_beta"] = float(context.run_config["proto-ema-beta"])
+        strategy_kwargs["transfer_tau"] = float(context.run_config.get("transfer-tau"))
         strategy_kwargs["num_rounds"] = num_rounds
 
     strategy = get_strategy(algorithm, **strategy_kwargs)

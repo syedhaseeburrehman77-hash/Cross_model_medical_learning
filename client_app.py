@@ -258,14 +258,35 @@ def train(msg: Message, context: Context):
             modality=modality,
         )
     elif algorithm == "fedcm_moon":
-        group_model_state = load_group_model(modality)
+        current_server_round = int(cfg.get("server-round", 1))
+        lambda_t = float(cfg.get("moon-lambda-t", 0.0))
+        is_warmup = (lambda_t == 0.0)
+
+        opp_protos = {}
+        weights = {}
+        if not is_warmup:
+            try:
+                guidance = load_cross_modal_guidance(
+                    partition_id,
+                    expected_round=current_server_round,
+                    output_dir="results/fedcm_moon",
+                )
+                opp_protos = guidance.get("opposite_master_prototypes", {})
+                weights = guidance.get("transfer_weights", {})
+            except Exception as e:
+                print(f"[FedCM-MOON Warning] Client {partition_id} could not load guidance for round {current_server_round}: {e}")
+
         trainer = get_trainer(
             algorithm,
-            group_model_state=group_model_state,
-            mu=float(cfg.get("moon-mu", context.run_config.get("moon-mu", 1.0))),
-            lambda_t=float(cfg.get("moon-lambda-t", 0.0)),
-            temperature=float(cfg.get("moon-temperature", context.run_config.get("moon-temperature", 0.5))),
-            weight_decay=float(context.run_config.get("moon-weight-decay", 1e-5)),
+            opposite_master_prototypes=opp_protos,
+            transfer_weights=weights,
+            mu=float(context.run_config["moon-mu"]),
+            lambda_t=lambda_t,
+            temperature=float(context.run_config["moon-temperature"]),
+            momentum=float(context.run_config["moon-momentum"]),
+            weight_decay=float(context.run_config["moon-weight-decay"]),
+            client_id=partition_id,
+            modality=modality,
         )
     else:
         # Load global prototypes for FedPAC feature alignment
@@ -463,28 +484,28 @@ def train(msg: Message, context: Context):
         print(f"[FedLC] Client {partition_id}: saved personalized head/calibration "
             f"with {len(head_state)} tensors")
 
-    if algorithm == "fedcmproto":
+    if algorithm in ("fedcmproto", "fedcm_moon"):
         client_protos, class_counts = compute_class_prototypes(model, trainloader, device)
         if not client_protos:
             raise RuntimeError(
-                f"[CrossModalProto Error] Client {partition_id} ({modality}) extracted 0 class prototypes."
+                f"[{algorithm} Error] Client {partition_id} ({modality}) extracted 0 class prototypes."
             )
-        cm_dir = Path("results/cross_modal_proto")
-        cm_dir.mkdir(parents=True, exist_ok=True)
+        target_dir = Path("results/fedcm_moon" if algorithm == "fedcm_moon" else "results/cross_modal_proto")
+        target_dir.mkdir(parents=True, exist_ok=True)
         proto_data = {
-            "round": int(cfg["server-round"]),
+            "round": int(cfg.get("server-round", 1)),
             "prototypes": client_protos,
             "counts": class_counts,
             "partition_id": partition_id,
             "modality": modality,
         }
-        torch.save(proto_data, cm_dir / f"client_{partition_id}_latest_prototype.pt")
+        torch.save(proto_data, target_dir / f"client_{partition_id}_latest_prototype.pt")
 
         print(f"[Prototype] Client {partition_id} ({modality}): computed prototypes for classes {sorted(list(client_protos.keys()))}")
         for c in sorted(list(client_protos.keys())):
             p = client_protos[c]
             c_name = "Tumor" if c == 1 else ("Healthy" if c == 0 else f"Class_{c}")
-            print(f"  └── Class {c} ({c_name}): count={class_counts[c]}, dim={p.shape[0]}, norm={p.norm().item():.4f}")
+            print(f"  └── Class {c} ({c_name}): count={class_counts.get(c, 0)}, dim={p.shape[0]}, norm={p.norm().item():.4f}")
 
     # Class Prototypes only needed for prototype-based algorithms unless explicitly enabled
     elif context.run_config.get("compute-prototypes", False) or algorithm in ("fedproto", "fedpac"):
