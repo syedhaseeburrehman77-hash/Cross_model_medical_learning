@@ -46,12 +46,16 @@ def main(grid: Grid, context: Context) -> None:
     num_classes = int(context.run_config.get("num-classes", 2))
     compute_prototypes = context.run_config.get("compute-prototypes", False)
     use_wandb = context.run_config.get("use-wandb", True)
-    # Clear the evaluation metrics CSV once at the beginning of this run
+    # Clear the evaluation metrics CSVs once at the beginning of this run
     metrics_file = Path(f"results/evaluation_metrics_{algorithm}.csv")
     metrics_file.parent.mkdir(parents=True, exist_ok=True)
 
     if metrics_file.exists():
         metrics_file.unlink()
+
+    detailed_metrics_file = Path(f"results/detailed_metrics_{algorithm}.csv")
+    if detailed_metrics_file.exists():
+        detailed_metrics_file.unlink()
 
     print(f"Started fresh metrics CSV: {metrics_file}")
 
@@ -301,8 +305,15 @@ def global_evaluate(server_round: int, arrays: ArrayRecord) -> MetricRecord:
         scenario=scenario,
         )
 
-    # Evaluate the global model on the test set
-    test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity = evaluate_model(model, test_dataloader, device)
+    # Evaluate the global model on the test set (with class-wise & modality-wise breakdown)
+    test_loss, test_acc, test_precision, test_recall, test_f1, test_sensitivity, test_specificity = evaluate_model(
+        model,
+        test_dataloader,
+        device,
+        print_breakdown=True,
+        round_num=server_round,
+        algorithm=algorithm,
+    )
 
     # Return the evaluation metrics
     metrics= {"accuracy": test_acc,
