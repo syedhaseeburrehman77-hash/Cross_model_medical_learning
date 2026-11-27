@@ -22,18 +22,40 @@ def find_last_linear(model: nn.Module) -> Tuple[str, nn.Linear]:
     return linear_layers[-1]
 
 
-class FeatureExtractor:
-    """Hooks into the model right before the final classification linear layer
+def find_feature_capture_layer(model: nn.Module) -> Tuple[str, nn.Module]:
+    """Find the layer to hook for clean feature representation capture.
+    If the final classification linear layer is immediately preceded by a Dropout layer
+    (e.g. nn.Dropout(0.3) in MobileNet/ResNet classifiers), hooks the Dropout layer's
+    pre-hook to capture clean features BEFORE dropout is applied.
+    This eliminates the train/eval dropout mismatch while preserving
+    dropout regularization for the classification head.
+    """
+    if hasattr(model, "classifier") and isinstance(model.classifier, nn.Sequential):
+        linear_indices = [
+            i for i, mod in enumerate(model.classifier)
+            if isinstance(mod, nn.Linear) and not getattr(mod, "_is_projector", False)
+        ]
+        if linear_indices:
+            last_idx = linear_indices[-1]
+            if last_idx > 0 and isinstance(model.classifier[last_idx - 1], (nn.Dropout, nn.Dropout2d, nn.Dropout1d)):
+                return f"classifier.{last_idx - 1}", model.classifier[last_idx - 1]
+            return f"classifier.{last_idx}", model.classifier[last_idx]
 
-    to capture feature representations (embeddings) during forward pass.
+    return find_last_linear(model)
+
+
+class FeatureExtractor:
+    """Hooks into the model before the classification head to capture clean
+    feature representations (embeddings) during forward pass, immune to dropout mismatch.
     """
 
-    def __init__(self, model: nn.Module):
+    def __init__(self, model: nn.Module, before_dropout: bool = False):
         self.model = model
         self.features = None
-        layer_name, last_linear = find_last_linear(model)
+        # Keep before_dropout=False by default so FedProto/FedPAC stay identical; fedcm_moon sets True to avoid train/eval dropout mismatch.
+        layer_name, target_layer = find_feature_capture_layer(model) if before_dropout else find_last_linear(model)
         self.layer_name = layer_name
-        self.hook = last_linear.register_forward_pre_hook(self._capture_hook)
+        self.hook = target_layer.register_forward_pre_hook(self._capture_hook)
 
     def _capture_hook(self, _module, inputs):
         feat = inputs[0]
@@ -58,6 +80,7 @@ def compute_class_prototypes(
     model: nn.Module,
     dataloader,
     device: torch.device,
+    before_dropout: bool = False,
 ) -> Tuple[Dict[int, torch.Tensor], Dict[int, int]]:
     """Compute the mean feature representation (prototype) for each class
 
@@ -67,6 +90,7 @@ def compute_class_prototypes(
         model: PyTorch model.
         dataloader: DataLoader for the client's dataset (train or val).
         device: Device to run inference on.
+        before_dropout: Capture features before final Dropout (used by fedcm_moon).
 
     Returns:
         prototypes: Dict mapping class_id -> mean feature tensor (1D, CPU).
@@ -78,7 +102,7 @@ def compute_class_prototypes(
     feature_sums: Dict[int, torch.Tensor] = {}
     class_counts: Dict[int, int] = {}
 
-    with FeatureExtractor(model) as extractor:
+    with FeatureExtractor(model, before_dropout=before_dropout) as extractor:
         with torch.no_grad():
             for batch in dataloader:
                 images = batch["img"].to(device)

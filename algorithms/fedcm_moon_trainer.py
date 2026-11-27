@@ -116,7 +116,8 @@ class FedCMMoonTrainer(BaseTrainer):
         local_forward = MoonFeatureForward(model)
         global_forward = MoonFeatureForward(global_model)
         previous_forward = MoonFeatureForward(previous_model) if has_previous else None
-        proto_extractor = FeatureExtractor(model)
+        # Hook pre-dropout 256-dim features for fedcm_moon so train() and eval() prototypes match.
+        proto_extractor = FeatureExtractor(model, before_dropout=True)
 
         total_loss = 0.0
         total_ce_loss = 0.0
@@ -164,7 +165,7 @@ class FedCMMoonTrainer(BaseTrainer):
                     # 3. Idea C: Class-Wise Modality Prototype Alignment Loss
                     if self.lambda_t > 0.0 and self._device_target_prototypes and proto_features is not None:
                         loss_align_num = torch.tensor(0.0, device=device)
-                        weight_sum = 0.0
+                        aligned_class_count = 0
                         for c_val in labels.unique().tolist():
                             c = int(c_val)
                             if c not in self._device_target_prototypes:
@@ -181,11 +182,14 @@ class FedCMMoonTrainer(BaseTrainer):
                             cos_sim = F.cosine_similarity(p_kc.unsqueeze(0), P_opp.unsqueeze(0), dim=1).squeeze(0)
                             cos_dist = 1.0 - cos_sim
 
+                            # Directional gating: g_kc preserves absolute magnitude in [0, 1]
                             loss_align_num = loss_align_num + (g_kc * cos_dist)
-                            weight_sum += g_kc
+                            aligned_class_count += 1
 
-                        if weight_sum > 0.0:
-                            loss_align = loss_align_num / (weight_sum + 1e-8)
+                        if aligned_class_count > 0:
+                            # Average across classes in batch without dividing by sum(g_kc)
+                            # so that the absolute gating magnitude of (1 - Conf_client) is preserved
+                            loss_align = loss_align_num / float(aligned_class_count)
                         else:
                             loss_align = torch.tensor(0.0, device=device)
                     else:

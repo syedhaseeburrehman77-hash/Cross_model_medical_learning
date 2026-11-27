@@ -485,7 +485,8 @@ def train(msg: Message, context: Context):
             f"with {len(head_state)} tensors")
 
     if algorithm in ("fedcmproto", "fedcm_moon"):
-        client_protos, class_counts = compute_class_prototypes(model, trainloader, device)
+        # Use pre-dropout features only for fedcm_moon to keep other prototype baselines untouched.
+        client_protos, class_counts = compute_class_prototypes(model, trainloader, device, before_dropout=(algorithm == "fedcm_moon"))
         if not client_protos:
             raise RuntimeError(
                 f"[{algorithm} Error] Client {partition_id} ({modality}) extracted 0 class prototypes."
